@@ -1,0 +1,669 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/auth_service.dart';
+import '../models/usuario.dart';
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _authService = AuthService();
+  final _formKey = GlobalKey<FormState>();
+  
+  bool _isLogin = true; // true = login, false = cadastro
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  
+  // Controladores
+  final _nomeController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _senhaController = TextEditingController();
+  final _cpfController = TextEditingController();
+  final _telefoneController = TextEditingController();
+  final _dataNascimentoController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nomeController.dispose();
+    _emailController.dispose();
+    _senhaController.dispose();
+    _cpfController.dispose();
+    _telefoneController.dispose();
+    _dataNascimentoController.dispose();
+    super.dispose();
+  }
+
+  // Formatadores de texto
+  TextInputFormatter cpfFormatter = TextInputFormatter.withFunction((oldValue, newValue) {
+    final text = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (text.length > 11) return oldValue;
+    
+    String formatted = '';
+    for (int i = 0; i < text.length; i++) {
+      if (i == 3 || i == 6) formatted += '.';
+      if (i == 9) formatted += '-';
+      formatted += text[i];
+    }
+    
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  });
+
+  TextInputFormatter telefoneFormatter = TextInputFormatter.withFunction((oldValue, newValue) {
+    final text = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (text.length > 11) return oldValue;
+    
+    String formatted = '';
+    if (text.isNotEmpty) {
+      formatted = '(';
+      for (int i = 0; i < text.length; i++) {
+        if (i == 2) formatted += ') ';
+        if (i == 7) formatted += '-';
+        formatted += text[i];
+      }
+    }
+    
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  });
+
+  void _toggleMode() {
+    setState(() {
+      _isLogin = !_isLogin;
+    });
+  }
+
+  Future<void> _submitForm() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      if (_isLogin) {
+        // LOGIN
+        final usuario = await _authService.loginComEmail(
+          email: _emailController.text.trim(),
+          senha: _senhaController.text,
+        );
+
+        if (usuario != null && mounted) {
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
+      } else {
+        // CADASTRO
+        final usuario = await _authService.cadastrarComEmail(
+          nome: _nomeController.text.trim(),
+          email: _emailController.text.trim(),
+          senha: _senhaController.text,
+          cpf: _cpfController.text,
+          telefone: _telefoneController.text,
+          dataNascimento: _dataNascimentoController.text.isNotEmpty
+              ? _dataNascimentoController.text
+              : null,
+        );
+
+        if (usuario != null && mounted) {
+          // Mostra mensagem de sucesso
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Cadastro realizado! Verifique seu email.'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 5),
+            ),
+          );
+
+          // Vai para home
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loginComGoogle() async {
+    // Primeiro solicita CPF e telefone
+    final cpfTelefone = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (context) => _DadosComplementaresDialog(),
+    );
+
+    if (cpfTelefone == null) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final usuario = await _authService.loginComGoogle(
+        cpf: cpfTelefone['cpf']!,
+        telefone: cpfTelefone['telefone']!,
+      );
+
+      if (usuario != null && mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Theme.of(context).primaryColor,
+              Theme.of(context).colorScheme.secondary,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Logo
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Image.asset(
+                        'assets/logos/logo_notaok_final.png',
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Título
+                  const Text(
+                    'NotaOK',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Comprou? Tá OK!',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 40),
+
+                  // Card de Login/Cadastro
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Toggle Login/Cadastro
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildToggleButton('Login', _isLogin),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _buildToggleButton('Cadastro', !_isLogin),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Campos de Cadastro
+                          if (!_isLogin) ...[
+                            _buildTextField(
+                              controller: _nomeController,
+                              label: 'Nome Completo',
+                              icon: Icons.person,
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Digite seu nome';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            _buildTextField(
+                              controller: _cpfController,
+                              label: 'CPF',
+                              icon: Icons.badge,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [cpfFormatter],
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Digite seu CPF';
+                                }
+                                if (!Usuario.validarCPF(value)) {
+                                  return 'CPF inválido';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            _buildTextField(
+                              controller: _telefoneController,
+                              label: 'Telefone',
+                              icon: Icons.phone,
+                              keyboardType: TextInputType.phone,
+                              inputFormatters: [telefoneFormatter],
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Digite seu telefone';
+                                }
+                                final telefone = value.replaceAll(RegExp(r'[^0-9]'), '');
+                                if (telefone.length != 11) {
+                                  return 'Telefone inválido';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+
+                          // Email
+                          _buildTextField(
+                            controller: _emailController,
+                            label: 'Email',
+                            icon: Icons.email,
+                            keyboardType: TextInputType.emailAddress,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Digite seu email';
+                              }
+                              if (!value.contains('@')) {
+                                return 'Email inválido';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Senha
+                          _buildTextField(
+                            controller: _senhaController,
+                            label: 'Senha',
+                            icon: Icons.lock,
+                            obscureText: _obscurePassword,
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePassword = !_obscurePassword;
+                                });
+                              },
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Digite sua senha';
+                              }
+                              if (value.length < 6) {
+                                return 'Senha deve ter no mínimo 6 caracteres';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Botão de Submit
+                          ElevatedButton(
+                            onPressed: _isLoading ? null : _submitForm,
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              backgroundColor: Theme.of(context).primaryColor,
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Text(
+                                    _isLogin ? 'Entrar' : 'Cadastrar',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                          ),
+
+                          // Recuperar senha
+                          if (_isLogin) ...[
+                            const SizedBox(height: 16),
+                            TextButton(
+                              onPressed: () {
+                                // TODO: Implementar recuperação de senha
+                              },
+                              child: const Text('Esqueci minha senha'),
+                            ),
+                          ],
+
+                          // Divisor
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 24),
+                            child: Row(
+                              children: [
+                                Expanded(child: Divider()),
+                                Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 16),
+                                  child: Text('OU'),
+                                ),
+                                Expanded(child: Divider()),
+                              ],
+                            ),
+                          ),
+
+                          // Login Social
+                          _buildSocialButton(
+                            label: 'Continuar com Google',
+                            icon: Icons.g_mobiledata,
+                            color: const Color(0xFF4285F4),
+                            onPressed: _loginComGoogle,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildSocialButton(
+                            label: 'Continuar com Apple',
+                            icon: Icons.apple,
+                            color: Colors.black,
+                            onPressed: () {
+                              // TODO: Implementar login com Apple
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          _buildSocialButton(
+                            label: 'Continuar com Facebook',
+                            icon: Icons.facebook,
+                            color: const Color(0xFF1877F2),
+                            onPressed: () {
+                              // TODO: Implementar login com Facebook
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Botão Entrar como Visitante (Autenticação Anônima Firebase)
+                  TextButton.icon(
+                    onPressed: () async {
+                      try {
+                        // Autenticação anônima no Firebase
+                        await FirebaseAuth.instance.signInAnonymously();
+                        if (mounted) {
+                          Navigator.of(context).pushReplacementNamed('/home');
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Erro ao entrar: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.person_outline, color: Colors.white),
+                    label: const Text(
+                      'Entrar como Visitante',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      backgroundColor: Colors.white.withValues(alpha: 0.2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToggleButton(String text, bool isSelected) {
+    return GestureDetector(
+      onTap: _toggleMode,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? Theme.of(context).primaryColor : Colors.grey[200],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.grey[600],
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    bool obscureText = false,
+    TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
+    String? Function(String?)? validator,
+    Widget? suffixIcon,
+  }) {
+    return TextFormField(
+      controller: controller,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        suffixIcon: suffixIcon,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Theme.of(context).primaryColor),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSocialButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onPressed,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: _isLoading ? null : onPressed,
+      icon: Icon(icon, color: color),
+      label: Text(
+        label,
+        style: const TextStyle(color: Colors.black87),
+      ),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        side: BorderSide(color: Colors.grey[300]!),
+      ),
+    );
+  }
+}
+
+// Dialog para solicitar CPF e telefone no login social
+class _DadosComplementaresDialog extends StatefulWidget {
+  @override
+  State<_DadosComplementaresDialog> createState() => _DadosComplementaresDialogState();
+}
+
+class _DadosComplementaresDialogState extends State<_DadosComplementaresDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _cpfController = TextEditingController();
+  final _telefoneController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Dados Obrigatórios'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Para completar seu cadastro, precisamos de algumas informações:'),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _cpfController,
+              decoration: const InputDecoration(
+                labelText: 'CPF',
+                hintText: '000.000.000-00',
+              ),
+              keyboardType: TextInputType.number,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Digite seu CPF';
+                }
+                if (!Usuario.validarCPF(value)) {
+                  return 'CPF inválido';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _telefoneController,
+              decoration: const InputDecoration(
+                labelText: 'Telefone',
+                hintText: '(00) 00000-0000',
+              ),
+              keyboardType: TextInputType.phone,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Digite seu telefone';
+                }
+                final telefone = value.replaceAll(RegExp(r'[^0-9]'), '');
+                if (telefone.length != 11) {
+                  return 'Telefone inválido';
+                }
+                return null;
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            if (_formKey.currentState!.validate()) {
+              Navigator.of(context).pop({
+                'cpf': _cpfController.text,
+                'telefone': _telefoneController.text,
+              });
+            }
+          },
+          child: const Text('Continuar'),
+        ),
+      ],
+    );
+  }
+}
