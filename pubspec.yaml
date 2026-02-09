@@ -61,8 +61,8 @@ dependencies:
   hive: 2.2.3
   hive_flutter: 1.1.0
   
-  # QR Code Scanner (Web compatible)
-  mobile_scanner: ^5.1.1
+  # QR Code Scanner (alternativa compatível)
+  qr_code_scanner: ^1.0.1
   
   # HTTP Client for API calls
   http: 1.5.0
