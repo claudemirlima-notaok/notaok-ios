@@ -1,42 +1,29 @@
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import '../models/comprovante.dart';
 
+/// OCR Service simplificado - compatível com Firebase
+/// Remove dependência do Google ML Kit para evitar conflitos
 class OCRService {
-  static final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
-
-  // Processar imagem e extrair texto
+  // Processar imagem e extrair texto (modo simplificado)
   static Future<String> extrairTextoImagem(String imagemPath) async {
-    try {
-      final inputImage = InputImage.fromFilePath(imagemPath);
-      final recognizedText = await textRecognizer.processImage(inputImage);
-      return recognizedText.text;
-    } catch (e) {
-      return '';
-    }
+    // TODO: Implementar OCR alternativo ou integração com serviço online
+    // Por enquanto, retorna mensagem informativa
+    return 'OCR temporariamente desabilitado - aguardando implementação alternativa';
   }
 
   // Analisar texto do comprovante e extrair informações
   static Future<Comprovante?> processarComprovanteCartao(String imagemPath) async {
     try {
-      final texto = await extrairTextoImagem(imagemPath);
-      
-      if (texto.isEmpty) {
-        return null;
-      }
-
-      // Extrair informações do texto
-      final dados = _extrairDadosComprovante(texto);
-
+      // Cria comprovante básico com imagem
       final comprovante = Comprovante(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        estabelecimento: dados['estabelecimento'],
-        produto: dados['produto'],
-        valor: dados['valor'],
-        cartaoCredito: dados['cartao'],
-        bandeira: dados['bandeira'],
-        dataTransacao: dados['data'],
+        estabelecimento: 'Aguardando OCR',
+        produto: 'Processamento manual necessário',
+        valor: null,
+        cartaoCredito: null,
+        bandeira: null,
+        dataTransacao: null,
         imagemPath: imagemPath,
-        textoOCR: texto,
+        textoOCR: 'OCR temporariamente desabilitado',
         dataCadastro: DateTime.now(),
       );
 
@@ -162,6 +149,6 @@ class OCRService {
 
   // Limpar recursos
   static void dispose() {
-    textRecognizer.close();
+    // Nada a fazer na versão simplificada
   }
 }

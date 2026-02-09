@@ -82,8 +82,8 @@ dependencies:
   # Path Provider
   path_provider: ^2.1.2
   
-  # Google ML Kit for OCR
-  google_mlkit_text_recognition: ^0.13.0
+  # OCR alternativo compatível com Firebase
+  # google_mlkit_text_recognition: ^0.13.0  # REMOVIDO - conflito com Firebase
   
   # Permissions
   permission_handler: ^11.3.0
