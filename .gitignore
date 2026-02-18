@@ -24,3 +24,5 @@ Thumbs.db
 
 # Keep lib/ directory for source code!
 
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist.backup
