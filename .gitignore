@@ -26,3 +26,8 @@ Thumbs.db
 
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist.backup
+
+# Firebase configs
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist.backup
+*.backup
