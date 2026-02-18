@@ -75,7 +75,7 @@ class NotaOKApp extends StatelessWidget {
           backgroundColor: Color(0xFF6A1B9A),
           foregroundColor: Colors.white,
         ),
-        cardTheme: CardTheme(
+        cardTheme: CardThemeData(
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -99,7 +99,7 @@ class NotaOKApp extends StatelessWidget {
             
             // Verificar se o email foi verificado
             if (user != null && !user.emailVerified && !user.isAnonymous) {
-              return const EmailVerificationScreen();
+              return EmailVerificationScreen(email: user.email ?? '');
             }
             
             // Email verificado ou login anônimo, vai para home
