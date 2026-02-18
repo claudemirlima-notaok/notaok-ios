@@ -1,15 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'firebase_options.dart';
-import 'services/hive_service.dart';
-import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
-import 'screens/email_verification_screen.dart';
 import 'splash_screen.dart';
 
-void main() async {
+void main() {
   // Configurar tratamento de erros
   FlutterError.onError = (FlutterErrorDetails details) {
     if (kDebugMode) {
@@ -21,35 +14,8 @@ void main() async {
   // Garantir inicialização do Flutter
   WidgetsFlutterBinding.ensureInitialized();
 
-  try {
-    // 🔥 PASSO 1: Inicializar Firebase UMA VEZ
-    if (Firebase.apps.isEmpty) {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      if (kDebugMode) {
-        debugPrint('✅ Firebase inicializado com sucesso!');
-      }
-    } else {
-      if (kDebugMode) {
-        debugPrint('✅ Firebase já estava inicializado');
-      }
-    }
-
-    // 📦 PASSO 2: Inicializar Hive DEPOIS do Firebase
-    await HiveService.init();
-    if (kDebugMode) {
-      debugPrint('✅ Hive inicializado com sucesso!');
-    }
-
-  } catch (e, stackTrace) {
-    if (kDebugMode) {
-      debugPrint('❌ Erro na inicialização: $e');
-      debugPrint('Stack trace: $stackTrace');
-    }
-  }
-
-  // 🚀 PASSO 3: Iniciar o app DEPOIS de tudo estar pronto
+  // 🚀 Iniciar o app DIRETAMENTE com o SplashScreen
+  // O SplashScreen vai cuidar de TODA a inicialização
   runApp(const NotaOKApp());
 }
 
@@ -85,38 +51,9 @@ class NotaOKApp extends StatelessWidget {
           elevation: 4,
         ),
       ),
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          // Enquanto verifica autenticação, mostra splash
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const SplashScreen();
-          }
-
-          // Se tem usuário logado
-          if (snapshot.hasData) {
-            final user = snapshot.data;
-            
-            // Verificar se o email foi verificado
-            if (user != null && !user.emailVerified && !user.isAnonymous) {
-              return EmailVerificationScreen(
-                email: user.email ?? '',
-                userId: user.uid,
-              );
-            }
-            
-            // Email verificado ou login anônimo, vai para home
-            return const HomeScreen();
-          }
-
-          // Não tem usuário, mostra login
-          return const LoginScreen();
-        },
-      ),
-      routes: {
-        '/login': (context) => const LoginScreen(),
-        '/home': (context) => const HomeScreen(),
-      },
+      // 🎯 INICIAR SEMPRE COM O SPLASHSCREEN
+      // Ele vai cuidar de Firebase, Hive e Autenticação
+      home: const SplashScreen(),
     );
   }
 }

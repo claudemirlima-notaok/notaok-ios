@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:async';
-import 'screens/home_screen.dart';
+import 'firebase_options.dart';
+import 'services/hive_service.dart';
 import 'screens/login_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/email_verification_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -11,153 +14,208 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
+class _SplashScreenState extends State<SplashScreen> {
+  bool _isInitialized = false;
+  String _errorMessage = '';
 
   @override
   void initState() {
     super.initState();
-    
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    );
-
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
-    );
-
-    _scaleAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
-    );
-
-    _controller.forward();
-
-    // Verificar autenticação após animação
-    Timer(const Duration(milliseconds: 2500), () {
-      _checkAuthStatus();
-    });
+    _initialize();
   }
 
-  Future<void> _checkAuthStatus() async {
-    if (!mounted) return;
-
+  Future<void> _initialize() async {
     try {
-      // Verificar se há usuário logado no Firebase
-      final user = FirebaseAuth.instance.currentUser;
-
-      if (user != null && user.emailVerified) {
-        // Usuário logado e verificado -> HomeScreen
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const HomeScreen(),
-          ),
+      // 🔥 PASSO 1: Inicializar Firebase UMA VEZ
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
         );
+        debugPrint('✅ Firebase inicializado com sucesso!');
       } else {
-        // Não logado ou email não verificado -> LoginScreen
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const LoginScreen(),
-          ),
-        );
+        debugPrint('✅ Firebase já estava inicializado');
       }
-    } catch (e) {
-      // Em caso de erro, vai para LoginScreen
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const LoginScreen(),
-          ),
-        );
-      }
+
+      // 📦 PASSO 2: Inicializar Hive DEPOIS do Firebase
+      await HiveService.init();
+      debugPrint('✅ Hive inicializado com sucesso!');
+
+      // ✅ PASSO 3: Aguardar 1 segundo para garantir que tudo está pronto
+      await Future.delayed(const Duration(seconds: 1));
+
+      setState(() {
+        _isInitialized = true;
+      });
+    } catch (e, stackTrace) {
+      debugPrint('❌ Erro na inicialização: $e');
+      debugPrint('Stack trace: $stackTrace');
+      
+      setState(() {
+        _errorMessage = e.toString();
+      });
     }
   }
 
   @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color(0xFF9C27B0), // Roxo
-              Color(0xFFFF6F00), // Laranja
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    // Se houve erro, mostra tela de erro
+    if (_errorMessage.isNotEmpty) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF6A1B9A),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  color: Colors.white,
+                  size: 64,
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Erro ao inicializar o app',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  _errorMessage,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _errorMessage = '';
+                    });
+                    _initialize();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: const Color(0xFF6A1B9A),
+                  ),
+                  child: const Text('Tentar Novamente'),
+                ),
+              ],
+            ),
           ),
         ),
-        child: Center(
-          child: FadeTransition(
-            opacity: _fadeAnimation,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
+      );
+    }
+
+    // Se ainda não inicializou, mostra splash screen
+    if (!_isInitialized) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF6A1B9A),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Logo ou ícone do app
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: const Icon(
+                  Icons.description_rounded,
+                  size: 64,
+                  color: Color(0xFF6A1B9A),
+                ),
+              ),
+              const SizedBox(height: 32),
+              const Text(
+                'NotaOK',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 48),
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Inicializando...',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ✅ Inicialização completa! Verificar autenticação
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // Enquanto verifica autenticação, mantém splash
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Scaffold(
+            backgroundColor: const Color(0xFF6A1B9A),
+            body: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Ícone de escudo com check
                   Container(
-                    width: 150,
-                    height: 150,
+                    width: 120,
+                    height: 120,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      shape: BoxShape.circle,
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
                     ),
                     child: const Icon(
-                      Icons.verified_user_rounded,
-                      size: 80,
-                      color: Colors.white,
+                      Icons.description_rounded,
+                      size: 64,
+                      color: Color(0xFF6A1B9A),
                     ),
                   ),
-                  const SizedBox(height: 40),
-                  
-                  // Nome do app
-                  const Text(
-                    'NotaOK',
-                    style: TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      letterSpacing: 2.0,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Slogan
-                  const Text(
-                    'Comprou? Tá OK!',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 60),
-                  
-                  // Loading indicator
-                  const SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      strokeWidth: 3,
-                    ),
+                  const SizedBox(height: 32),
+                  const CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                   ),
                 ],
               ),
             ),
-          ),
-        ),
-      ),
+          );
+        }
+
+        // Se tem usuário logado
+        if (snapshot.hasData) {
+          final user = snapshot.data;
+
+          // Verificar se o email foi verificado
+          if (user != null && !user.emailVerified && !user.isAnonymous) {
+            return EmailVerificationScreen(
+              email: user.email ?? '',
+              userId: user.uid,
+            );
+          }
+
+          // Email verificado ou login anônimo, vai para home
+          return const HomeScreen();
+        }
+
+        // Não tem usuário, mostra login
+        return const LoginScreen();
+      },
     );
   }
 }
