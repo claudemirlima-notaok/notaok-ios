@@ -1,13 +1,13 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'services/hive_service.dart';
-import 'splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/email_verification_screen.dart';
+import 'splash_screen.dart';
 
 void main() async {
   // Configurar tratamento de erros
@@ -18,37 +18,38 @@ void main() async {
     }
   };
 
+  // Garantir inicialização do Flutter
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   try {
-    // Inicializar Firebase apenas se ainda não foi inicializado
+    // 🔥 PASSO 1: Inicializar Firebase UMA VEZ
     if (Firebase.apps.isEmpty) {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
       if (kDebugMode) {
-        debugPrint('✅ Firebase inicializado com sucesso');
+        debugPrint('✅ Firebase inicializado com sucesso!');
       }
     } else {
       if (kDebugMode) {
         debugPrint('✅ Firebase já estava inicializado');
       }
     }
-    
-    // Inicializar Hive (para cache local)
+
+    // 📦 PASSO 2: Inicializar Hive DEPOIS do Firebase
     await HiveService.init();
-    
     if (kDebugMode) {
-      debugPrint('✅ NotaOK inicializado com sucesso');
+      debugPrint('✅ Hive inicializado com sucesso!');
     }
+
   } catch (e, stackTrace) {
     if (kDebugMode) {
-      debugPrint('❌ Erro ao inicializar: $e');
+      debugPrint('❌ Erro na inicialização: $e');
       debugPrint('Stack trace: $stackTrace');
     }
-    // Continue mesmo com erro - o app pode funcionar sem persistência
   }
-  
+
+  // 🚀 PASSO 3: Iniciar o app DEPOIS de tudo estar pronto
   runApp(const NotaOKApp());
 }
 
@@ -63,55 +64,49 @@ class NotaOKApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF9C27B0), // Roxo
-          secondary: const Color(0xFFFF6F00), // Laranja
-          brightness: Brightness.light,
+          seedColor: const Color(0xFF6A1B9A),
+          primary: const Color(0xFF6A1B9A),
+          secondary: const Color(0xFFFF6F00),
         ),
         scaffoldBackgroundColor: Colors.grey[50],
         appBarTheme: const AppBarTheme(
-          elevation: 0,
           centerTitle: true,
-          backgroundColor: Color(0xFF9C27B0),
+          elevation: 0,
+          backgroundColor: Color(0xFF6A1B9A),
           foregroundColor: Colors.white,
         ),
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
         ),
         floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: Color(0xFFFF6F00),
-          foregroundColor: Colors.white,
+          elevation: 4,
         ),
       ),
-      // Usar StreamBuilder para reagir a mudanças de autenticação
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
-          // Enquanto carrega
+          // Enquanto verifica autenticação, mostra splash
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const SplashScreen();
           }
-          
+
           // Se tem usuário logado
-          if (snapshot.hasData && snapshot.data != null) {
-            final user = snapshot.data!;
+          if (snapshot.hasData) {
+            final user = snapshot.data;
             
-            // Verificar se email foi verificado
-            if (!user.emailVerified && !user.isAnonymous) {
-              // Redirecionar para tela de verificação
-              return EmailVerificationScreen(
-                email: user.email ?? '',
-                userId: user.uid,
-              );
+            // Verificar se o email foi verificado
+            if (user != null && !user.emailVerified && !user.isAnonymous) {
+              return const EmailVerificationScreen();
             }
             
-            // Email verificado ou login social, vai para Home
+            // Email verificado ou login anônimo, vai para home
             return const HomeScreen();
           }
-          
-          // Senão, vai para Login
+
+          // Não tem usuário, mostra login
           return const LoginScreen();
         },
       ),
