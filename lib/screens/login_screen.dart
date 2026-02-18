@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../services/auth_service.dart';
 import '../models/usuario.dart';
+import 'email_verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -100,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } else {
         // CADASTRO
-        final usuario = await _authService.cadastrarComEmail(
+        final resultado = await _authService.cadastrarComEmail(
           nome: _nomeController.text.trim(),
           email: _emailController.text.trim(),
           senha: _senhaController.text,
@@ -111,18 +113,17 @@ class _LoginScreenState extends State<LoginScreen> {
               : null,
         );
 
-        if (usuario != null && mounted) {
-          // Mostra mensagem de sucesso
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Cadastro realizado! Verifique seu email.'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 5),
+        if (resultado != null && mounted) {
+          // Navegar para tela de verificação de email
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EmailVerificationScreen(
+                email: resultado['email'],
+                userId: resultado['userId'],
+              ),
             ),
           );
-
-          // Vai para home
-          Navigator.of(context).pushReplacementNamed('/home');
         }
       }
     } catch (e) {
@@ -166,6 +167,47 @@ class _LoginScreenState extends State<LoginScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('❌ ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loginComApple() async {
+    setState(() => _isLoading = true);
+
+    try {
+      // Solicita credenciais do Apple
+      final appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+      );
+
+      // Cria credencial OAuth para Firebase
+      final oAuthProvider = OAuthProvider('apple.com');
+      final credential = oAuthProvider.credential(
+        idToken: appleCredential.identityToken,
+        accessToken: appleCredential.authorizationCode,
+      );
+
+      // Autentica no Firebase
+      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+
+      if (userCredential.user != null && mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Erro no login com Apple: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -441,9 +483,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             label: 'Continuar com Apple',
                             icon: Icons.apple,
                             color: Colors.black,
-                            onPressed: () {
-                              // TODO: Implementar login com Apple
-                            },
+                            onPressed: _loginComApple,
                           ),
                           const SizedBox(height: 12),
                           _buildSocialButton(

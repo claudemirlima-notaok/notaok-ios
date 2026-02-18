@@ -19,8 +19,8 @@ class AuthService {
   // Verifica se o usuário está logado
   bool get isLoggedIn => currentUser != null;
 
-  // 1. CADASTRO POR EMAIL (com validação de email e CPF)
-  Future<Usuario?> cadastrarComEmail({
+  // 1. CADASTRO POR EMAIL (SOMENTE cria no Auth, Firestore só após verificação)
+  Future<Map<String, dynamic>?> cadastrarComEmail({
     required String nome,
     required String email,
     required String senha,
@@ -50,33 +50,33 @@ class AuthService {
         password: senha,
       );
 
-      // Envia email de verificação
-      await userCredential.user?.sendEmailVerification();
-
-      // Cria objeto Usuario
-      final usuario = Usuario(
-        id: userCredential.user!.uid,
-        nome: nome,
-        email: email,
-        cpf: cpfLimpo,
-        telefone: telefone,
-        dataNascimento: dataNascimento,
-        tipoLogin: 'email',
-        emailVerificado: false,
-      );
-
-      // Salva no Firestore
-      await _salvarUsuarioFirestore(usuario);
-
-      // Salva localmente no Hive
-      await HiveService.salvarUsuario(usuario);
+      // Salva dados temporários no Firestore (coleção temp_usuarios)
+      // Serão movidos para 'usuarios' após verificação
+      await _firestore.collection('temp_usuarios').doc(userCredential.user!.uid).set({
+        'nome': nome,
+        'email': email,
+        'cpf': cpfLimpo,
+        'telefone': telefone,
+        'dataNascimento': dataNascimento,
+        'tipoLogin': 'email',
+        'emailVerificado': false,
+        'criadoEm': FieldValue.serverTimestamp(),
+      });
 
       if (kDebugMode) {
-        debugPrint('✅ Usuário cadastrado com sucesso: ${usuario.email}');
-        debugPrint('📧 Email de verificação enviado');
+        debugPrint('✅ Usuário criado no Auth (aguardando verificação): $email');
+        debugPrint('📧 Código de verificação será enviado via Cloud Function');
       }
 
-      return usuario;
+      // Retorna dados para a tela de verificação
+      return {
+        'userId': userCredential.user!.uid,
+        'email': email,
+        'nome': nome,
+        'cpf': cpfLimpo,
+        'telefone': telefone,
+        'dataNascimento': dataNascimento,
+      };
     } on FirebaseAuthException catch (e) {
       if (kDebugMode) {
         debugPrint('❌ Erro ao cadastrar: ${e.code}');
@@ -94,6 +94,53 @@ class AuthService {
     } catch (e) {
       if (kDebugMode) {
         debugPrint('❌ Erro ao cadastrar: $e');
+      }
+      rethrow;
+    }
+  }
+
+
+  // Confirmar verificação de email e mover dados para coleção principal
+  Future<Usuario?> confirmarVerificacaoEmail(String userId) async {
+    try {
+      // Buscar dados temporários
+      final tempDoc = await _firestore.collection('temp_usuarios').doc(userId).get();
+      
+      if (!tempDoc.exists) {
+        throw Exception('Dados do usuário não encontrados');
+      }
+      
+      final dados = tempDoc.data()!;
+      
+      // Criar objeto Usuario
+      final usuario = Usuario(
+        id: userId,
+        nome: dados['nome'],
+        email: dados['email'],
+        cpf: dados['cpf'],
+        telefone: dados['telefone'],
+        dataNascimento: dados['dataNascimento'],
+        tipoLogin: dados['tipoLogin'],
+        emailVerificado: true,
+      );
+      
+      // Salvar na coleção principal
+      await _salvarUsuarioFirestore(usuario);
+      
+      // Salvar localmente
+      await HiveService.salvarUsuario(usuario);
+      
+      // Deletar dados temporários
+      await _firestore.collection('temp_usuarios').doc(userId).delete();
+      
+      if (kDebugMode) {
+        debugPrint('✅ Email verificado! Usuário movido para coleção principal');
+      }
+      
+      return usuario;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('❌ Erro ao confirmar verificação: $e');
       }
       rethrow;
     }

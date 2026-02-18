@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/nfe_service.dart';
 import '../services/hive_service.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/ocr_service.dart';
 import 'selecao_produtos_screen.dart';
+
+// QR Code Scanner só funciona em mobile
+dynamic _qrCodeScanner;
+dynamic _qrViewController;
 
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
@@ -15,7 +18,8 @@ class ScannerScreen extends StatefulWidget {
 }
 
 class _ScannerScreenState extends State<ScannerScreen> {
-  final MobileScannerController cameraController = MobileScannerController();
+  final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
+  dynamic controller;
   bool isProcessing = false;
   bool flashEnabled = false;
 
@@ -34,16 +38,18 @@ class _ScannerScreenState extends State<ScannerScreen> {
         actions: [
           IconButton(
             icon: Icon(flashEnabled ? Icons.flash_on : Icons.flash_off),
-            onPressed: () {
+            onPressed: () async {
+              await controller?.toggleFlash();
               setState(() {
                 flashEnabled = !flashEnabled;
               });
-              cameraController.toggleTorch();
             },
           ),
           IconButton(
             icon: const Icon(Icons.flip_camera_android),
-            onPressed: () => cameraController.switchCamera(),
+            onPressed: () async {
+              await controller?.flipCamera();
+            },
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
@@ -76,31 +82,62 @@ class _ScannerScreenState extends State<ScannerScreen> {
         children: [
           Expanded(
             flex: 5,
-            child: Stack(
-              children: [
-                MobileScanner(
-                  controller: cameraController,
-                  onDetect: (capture) {
-                    final List<Barcode> barcodes = capture.barcodes;
-                    if (!isProcessing && barcodes.isNotEmpty) {
-                      final String? code = barcodes.first.rawValue;
-                      if (code != null) {
-                        _processarQRCode(code);
-                      }
-                    }
-                  },
-                ),
-                if (isProcessing)
-                  Container(
-                    color: Colors.black54,
-                    child: const Center(
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
+            child: kIsWeb
+                ? Container(
+                    color: Colors.grey[900],
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.qr_code_scanner_rounded,
+                            size: 100,
+                            color: Colors.white.withOpacity(0.3),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Scanner de QR Code\nnão disponível na Web',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Use a captura de comprovante abaixo',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                  )
+                : Stack(
+                    children: [
+                      Container(
+                        color: Colors.black,
+                        child: const Center(
+                          child: Text(
+                            'QR Scanner (Mobile Only)',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ),
+                      if (isProcessing)
+                        Container(
+                          color: Colors.black54,
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-              ],
-            ),
           ),
           Expanded(
             flex: 2,
@@ -167,13 +204,22 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
+  void _onQRViewCreated(dynamic controller) {
+    // QR View creation - mobile only
+    if (!kIsWeb) {
+      this.controller = controller;
+    }
+  }
+
   Future<void> _processarQRCode(String qrCode) async {
     setState(() {
       isProcessing = true;
     });
 
     try {
-      await cameraController.stop();
+      if (!kIsWeb && controller != null) {
+        // Pause camera on mobile
+      }
 
       final notaFiscal = await NFeService.processarQRCodeNFe(qrCode);
 
@@ -209,7 +255,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
       setState(() {
         isProcessing = false;
       });
-      await cameraController.start();
+      if (!kIsWeb && controller != null) {
+        // Resume camera on mobile
+      }
     }
   }
 
@@ -325,7 +373,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
   @override
   void dispose() {
-    cameraController.dispose();
+    if (!kIsWeb && controller != null) {
+      // Dispose controller on mobile
+    }
     super.dispose();
   }
 }

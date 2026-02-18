@@ -7,6 +7,7 @@ import 'services/hive_service.dart';
 import 'splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/email_verification_screen.dart';
 
 void main() async {
   // Configurar tratamento de erros
@@ -87,8 +88,20 @@ class NotaOKApp extends StatelessWidget {
             return const SplashScreen();
           }
           
-          // Se tem usuário logado, vai para Home
+          // Se tem usuário logado
           if (snapshot.hasData && snapshot.data != null) {
+            final user = snapshot.data!;
+            
+            // Verificar se email foi verificado
+            if (!user.emailVerified && !user.isAnonymous) {
+              // Redirecionar para tela de verificação
+              return EmailVerificationScreen(
+                email: user.email ?? '',
+                userId: user.uid,
+              );
+            }
+            
+            // Email verificado ou login social, vai para Home
             return const HomeScreen();
           }
           
