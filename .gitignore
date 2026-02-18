@@ -31,3 +31,5 @@ ios/Runner/GoogleService-Info.plist.backup
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist.backup
 *.backup
+firebase-admin-sdk.json
+functions/
