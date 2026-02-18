@@ -1,118 +1,13 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'firebase_options.dart';
-import 'services/hive_service.dart';
-import 'splash_screen.dart';
-import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
-import 'screens/email_verification_screen.dart';
-
-void main() async {
-  // Configurar tratamento de erros
-  FlutterError.onError = (FlutterErrorDetails details) {
-    if (kDebugMode) {
-      debugPrint('Flutter Error: ${details.exception}');
-      debugPrint('Stack trace: ${details.stack}');
-    }
-  };
-
-  WidgetsFlutterBinding.ensureInitialized();
-  
-  try {
-    // Inicializar Firebase
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    if (kDebugMode) {
-      debugPrint('✅ Firebase inicializado com sucesso');
-    }
-    
-    // Inicializar Hive (para cache local)
-    await HiveService.init();
-    
-    if (kDebugMode) {
-      debugPrint('✅ NotaOK inicializado com sucesso');
-    }
-  } catch (e, stackTrace) {
-    if (kDebugMode) {
-      debugPrint('❌ Erro ao inicializar: $e');
-      debugPrint('Stack trace: $stackTrace');
-    }
-    // Continue mesmo com erro - o app pode funcionar sem persistência
-  }
-  
-  runApp(const NotaOKApp());
-}
-
-class NotaOKApp extends StatelessWidget {
-  const NotaOKApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'NotaOK',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF9C27B0), // Roxo
-          secondary: const Color(0xFFFF6F00), // Laranja
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: Colors.grey[50],
-        appBarTheme: const AppBarTheme(
-          elevation: 0,
-          centerTitle: true,
-          backgroundColor: Color(0xFF9C27B0),
-          foregroundColor: Colors.white,
-        ),
-        cardTheme: CardThemeData(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: Color(0xFFFF6F00),
-          foregroundColor: Colors.white,
-        ),
-      ),
-      // Usar StreamBuilder para reagir a mudanças de autenticação
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          // Enquanto carrega
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const SplashScreen();
-          }
-          
-          // Se tem usuário logado
-          if (snapshot.hasData && snapshot.data != null) {
-            final user = snapshot.data!;
-            
-            // Verificar se email foi verificado
-            if (!user.emailVerified && !user.isAnonymous) {
-              // Redirecionar para tela de verificação
-              return EmailVerificationScreen(
-                email: user.email ?? '',
-                userId: user.uid,
-              );
-            }
-            
-            // Email verificado ou login social, vai para Home
-            return const HomeScreen();
-          }
-          
-          // Senão, vai para Login
-          return const LoginScreen();
-        },
-      ),
-      routes: {
-        '/login': (context) => const LoginScreen(),
-        '/home': (context) => const HomeScreen(),
-      },
-    );
-  }
-}
+<!DOCTYPE HTML>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>Error response</title>
+    </head>
+    <body>
+        <h1>Error response</h1>
+        <p>Error code: 404</p>
+        <p>Message: File not found.</p>
+        <p>Error code explanation: 404 - Nothing matches the given URI.</p>
+    </body>
+</html>
