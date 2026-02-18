@@ -99,7 +99,10 @@ class NotaOKApp extends StatelessWidget {
             
             // Verificar se o email foi verificado
             if (user != null && !user.emailVerified && !user.isAnonymous) {
-              return EmailVerificationScreen(email: user.email ?? '');
+              return EmailVerificationScreen(
+                email: user.email ?? '',
+                userId: user.uid,
+              );
             }
             
             // Email verificado ou login anônimo, vai para home
