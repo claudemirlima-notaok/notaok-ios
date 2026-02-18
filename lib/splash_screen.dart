@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
 import 'screens/home_screen.dart';
+import 'screens/login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -33,16 +35,44 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     _controller.forward();
 
-    // MODO DEMO: Vai direto para HOME sem login
+    // Verificar autenticação após animação
     Timer(const Duration(milliseconds: 2500), () {
-      if (mounted) {
+      _checkAuthStatus();
+    });
+  }
+
+  Future<void> _checkAuthStatus() async {
+    if (!mounted) return;
+
+    try {
+      // Verificar se há usuário logado no Firebase
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user != null && user.emailVerified) {
+        // Usuário logado e verificado -> HomeScreen
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) => const HomeScreen(),
           ),
         );
+      } else {
+        // Não logado ou email não verificado -> LoginScreen
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => const LoginScreen(),
+          ),
+        );
       }
-    });
+    } catch (e) {
+      // Em caso de erro, vai para LoginScreen
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => const LoginScreen(),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -55,11 +85,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              const Color(0xFF9C27B0), // Roxo
-              const Color(0xFFFF6F00), // Laranja
+              Color(0xFF9C27B0), // Roxo
+              Color(0xFFFF6F00), // Laranja
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -78,7 +108,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     width: 150,
                     height: 150,
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
+                      color: Colors.white.withOpacity(0.2),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
