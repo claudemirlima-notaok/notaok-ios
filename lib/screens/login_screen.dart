@@ -259,6 +259,74 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _recuperarSenha() async {
+    // Mostrar diálogo para inserir email
+    final emailController = TextEditingController();
+    
+    final resultado = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Recuperar Senha'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Digite seu email para receber um link de redefinição de senha:',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.email),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
+
+    if (resultado == true && emailController.text.isNotEmpty) {
+      try {
+        await _authService.redefinirSenha(emailController.text.trim());
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Email de recuperação enviado! Verifique sua caixa de entrada.'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(e.toString().replaceAll('Exception: ', '')),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+
+    emailController.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -489,9 +557,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           if (_isLogin) ...[
                             const SizedBox(height: 16),
                             TextButton(
-                              onPressed: () {
-                                // TODO: Implementar recuperação de senha
-                              },
+                              onPressed: _recuperarSenha,
                               child: const Text('Esqueci minha senha'),
                             ),
                           ],

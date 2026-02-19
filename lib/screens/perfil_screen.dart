@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/auth_service.dart';
+import 'login_screen.dart';
 
 class PerfilScreen extends StatefulWidget {
   const PerfilScreen({super.key});
@@ -11,6 +15,13 @@ class PerfilScreen extends StatefulWidget {
 class _PerfilScreenState extends State<PerfilScreen> {
   String _versaoApp = '';
   bool _isLoading = true;
+  
+  // ✅ Dados reais do usuário
+  String _nomeUsuario = 'Carregando...';
+  String _emailUsuario = '';
+  String? _cpfUsuario;
+  String? _telefoneUsuario;
+  String? _fotoUrl;
 
   @override
   void initState() {
@@ -25,9 +36,54 @@ class _PerfilScreenState extends State<PerfilScreen> {
       // Carrega versão do app
       final packageInfo = await PackageInfo.fromPlatform();
       _versaoApp = '${packageInfo.version} (${packageInfo.buildNumber})';
+
+      // ✅ Carrega dados reais do Firebase
+      final user = FirebaseAuth.instance.currentUser;
+      
+      if (user != null) {
+        _emailUsuario = user.email ?? '';
+        _fotoUrl = user.photoURL;
+        
+        // Nome do Firebase Auth (Google/Apple)
+        if (user.displayName != null && user.displayName!.isNotEmpty) {
+          _nomeUsuario = user.displayName!;
+        }
+
+        // Buscar dados adicionais no Firestore
+        try {
+          final doc = await FirebaseFirestore.instance
+              .collection('usuarios')
+              .doc(user.uid)
+              .get();
+
+          if (doc.exists) {
+            final data = doc.data()!;
+            
+            // Priorizar nome do Firestore
+            if (data['nome'] != null && data['nome'].toString().isNotEmpty) {
+              _nomeUsuario = data['nome'];
+            }
+            
+            _cpfUsuario = data['cpf'];
+            _telefoneUsuario = data['telefone'];
+          }
+        } catch (e) {
+          debugPrint('⚠️ Erro ao buscar dados do Firestore: $e');
+        }
+
+        // Se ainda não tem nome, usar email
+        if (_nomeUsuario == 'Carregando...' || _nomeUsuario.isEmpty) {
+          _nomeUsuario = _emailUsuario.split('@')[0];
+        }
+      } else {
+        // Usuário não logado (modo visitante)
+        _nomeUsuario = 'Visitante';
+        _emailUsuario = 'Modo visitante';
+      }
     } catch (e) {
       debugPrint('❌ Erro ao carregar dados: $e');
       _versaoApp = '1.0.0';
+      _nomeUsuario = 'Usuário';
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -42,6 +98,9 @@ class _PerfilScreenState extends State<PerfilScreen> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
+
+    final user = FirebaseAuth.instance.currentUser;
+    final isVisitante = user == null || user.isAnonymous;
 
     return Scaffold(
       body: CustomScrollView(
@@ -71,23 +130,26 @@ class _PerfilScreenState extends State<PerfilScreen> {
                       CircleAvatar(
                         radius: 50,
                         backgroundColor: Colors.white,
-                        child: Icon(Icons.person, size: 50, color: Theme.of(context).primaryColor),
+                        backgroundImage: _fotoUrl != null ? NetworkImage(_fotoUrl!) : null,
+                        child: _fotoUrl == null
+                            ? Icon(Icons.person, size: 50, color: Theme.of(context).primaryColor)
+                            : null,
                       ),
                       const SizedBox(height: 12),
-                      // Nome - MODO DEMO
-                      const Text(
-                        'Usuário Demo',
-                        style: TextStyle(
+                      // Nome real do usuário
+                      Text(
+                        _nomeUsuario,
+                        style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      // Email - MODO DEMO
-                      const Text(
-                        'demo@notaok.com.br',
-                        style: TextStyle(
+                      // Email real do usuário
+                      Text(
+                        _emailUsuario,
+                        style: const TextStyle(
                           fontSize: 14,
                           color: Colors.white70,
                         ),
@@ -107,37 +169,52 @@ class _PerfilScreenState extends State<PerfilScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Banner Modo Demo
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.orange),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info_outline, color: Colors.orange),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Modo Demo - Configure o Firebase para login completo',
-                            style: TextStyle(color: Colors.orange[900]),
+                  // Banner Modo Visitante (se aplicável)
+                  if (isVisitante) ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.orange),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline, color: Colors.orange),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Modo Visitante - Faça login para salvar seus dados',
+                              style: TextStyle(color: Colors.orange[900]),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: _fazerLogin,
+                      icon: const Icon(Icons.login),
+                      label: const Text('Fazer Login'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
 
                   // Seção: Meus Dados
                   _buildSectionTitle('Meus Dados'),
                   _buildMenuItem(
                     icon: Icons.person,
                     title: 'Dados Pessoais',
-                    subtitle: 'Nome, CPF, telefone',
+                    subtitle: _cpfUsuario != null 
+                        ? 'CPF: $_cpfUsuario'
+                        : 'Nome, CPF, telefone',
                     onTap: () {
-                      _mostrarMensagemDemo();
+                      _mostrarDadosPessoais();
                     },
                   ),
                   _buildMenuItem(
@@ -145,7 +222,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     title: 'Endereços',
                     subtitle: '0 endereço(s)',
                     onTap: () {
-                      _mostrarMensagemDemo();
+                      _mostrarEmBreve('Gerenciamento de endereços');
                     },
                   ),
                   const SizedBox(height: 24),
@@ -157,7 +234,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     title: 'Notificações',
                     subtitle: 'Alertas de garantias',
                     onTap: () {
-                      _mostrarMensagemDemo();
+                      _mostrarEmBreve('Configurações de notificações');
                     },
                   ),
                   _buildMenuItem(
@@ -165,7 +242,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     title: 'Segurança e Privacidade',
                     subtitle: 'Senha, dados pessoais',
                     onTap: () {
-                      _mostrarMensagemDemo();
+                      _mostrarEmBreve('Configurações de segurança');
                     },
                   ),
                   const SizedBox(height: 24),
@@ -193,7 +270,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     title: 'Avaliar App',
                     subtitle: 'Deixe sua avaliação',
                     onTap: () {
-                      _mostrarMensagemDemo();
+                      _mostrarEmBreve('Avaliação do app');
                     },
                   ),
                   _buildMenuItem(
@@ -201,7 +278,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     title: 'Compartilhar App',
                     subtitle: 'Convide seus amigos',
                     onTap: () {
-                      _mostrarMensagemDemo();
+                      _mostrarEmBreve('Compartilhamento');
                     },
                   ),
                   const SizedBox(height: 24),
@@ -212,14 +289,14 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     icon: Icons.description,
                     title: 'Termos de Uso',
                     onTap: () {
-                      _mostrarMensagemDemo();
+                      _mostrarEmBreve('Termos de uso');
                     },
                   ),
                   _buildMenuItem(
                     icon: Icons.privacy_tip,
                     title: 'Política de Privacidade',
                     onTap: () {
-                      _mostrarMensagemDemo();
+                      _mostrarEmBreve('Política de privacidade');
                     },
                   ),
                   _buildMenuItem(
@@ -228,6 +305,21 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     subtitle: _versaoApp,
                     trailing: const SizedBox.shrink(),
                   ),
+                  const SizedBox(height: 24),
+
+                  // Botão Sair (se logado)
+                  if (!isVisitante) ...[
+                    OutlinedButton.icon(
+                      onPressed: _fazerLogout,
+                      icon: const Icon(Icons.logout),
+                      label: const Text('Sair da Conta'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 40),
                 ],
               ),
@@ -283,14 +375,120 @@ class _PerfilScreenState extends State<PerfilScreen> {
     );
   }
 
-  void _mostrarMensagemDemo() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('📱 Funcionalidade disponível após configurar o Firebase'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 2),
+  void _mostrarDadosPessoais() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Dados Pessoais'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildDadoItem('Nome', _nomeUsuario),
+              _buildDadoItem('Email', _emailUsuario),
+              if (_cpfUsuario != null) _buildDadoItem('CPF', _cpfUsuario!),
+              if (_telefoneUsuario != null) _buildDadoItem('Telefone', _telefoneUsuario!),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Fechar'),
+          ),
+        ],
       ),
     );
+  }
+
+  Widget _buildDadoItem(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _mostrarEmBreve(String funcionalidade) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$funcionalidade em breve!'),
+        backgroundColor: Colors.blue,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _fazerLogin() async {
+    await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false,
+      );
+    }
+  }
+
+  void _fazerLogout() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sair da Conta'),
+        content: const Text('Tem certeza que deseja sair?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Sair'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar == true) {
+      try {
+        await AuthService().logout();
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
+            (route) => false,
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao sair: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   void _abrirFaleConosco() {
