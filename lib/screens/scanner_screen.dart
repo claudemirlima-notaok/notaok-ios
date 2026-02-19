@@ -92,14 +92,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
                           Icon(
                             Icons.qr_code_scanner_rounded,
                             size: 100,
-                            color: Colors.white.withOpacity(0.3),
+                            color: Colors.white.withValues(alpha: 0.3),
                           ),
                           const SizedBox(height: 24),
                           Text(
                             'Scanner de QR Code\nnão disponível na Web',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
+                              color: Colors.white.withValues(alpha: 0.7),
                               fontSize: 16,
                             ),
                           ),
