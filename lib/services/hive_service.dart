@@ -12,24 +12,59 @@ class HiveService {
   static const String comprovantesBox = 'comprovantes';
   static const String usuariosBox = 'usuarios';
 
-  // Inicializar Hive
+  // 🔒 Flag para controlar se já foi inicializado
+  static bool _isInitialized = false;
+
+  // Inicializar Hive (com proteção contra múltiplas chamadas)
   static Future<void> init() async {
+    // ✅ Se já foi inicializado, não fazer nada
+    if (_isInitialized) {
+      print('⚠️ HiveService já foi inicializado anteriormente');
+      return;
+    }
+
     await Hive.initFlutter();
 
-    // Registrar adaptadores
-    Hive.registerAdapter(ProdutoAdapter());
-    Hive.registerAdapter(NotaFiscalAdapter());
-    Hive.registerAdapter(AvaliacaoAdapter());
-    Hive.registerAdapter(ComprovanteAdapter());
-    Hive.registerAdapter(UsuarioAdapter());
-    Hive.registerAdapter(EnderecoAdapter());
+    // Registrar adaptadores SOMENTE se ainda não foram registrados
+    if (!Hive.isAdapterRegistered(0)) {
+      Hive.registerAdapter(ProdutoAdapter());
+    }
+    if (!Hive.isAdapterRegistered(1)) {
+      Hive.registerAdapter(NotaFiscalAdapter());
+    }
+    if (!Hive.isAdapterRegistered(2)) {
+      Hive.registerAdapter(AvaliacaoAdapter());
+    }
+    if (!Hive.isAdapterRegistered(3)) {
+      Hive.registerAdapter(ComprovanteAdapter());
+    }
+    if (!Hive.isAdapterRegistered(4)) {
+      Hive.registerAdapter(UsuarioAdapter());
+    }
+    if (!Hive.isAdapterRegistered(5)) {
+      Hive.registerAdapter(EnderecoAdapter());
+    }
 
-    // Abrir boxes
-    await Hive.openBox<Produto>(produtosBox);
-    await Hive.openBox<NotaFiscal>(notasFiscaisBox);
-    await Hive.openBox<Avaliacao>(avaliacoesBox);
-    await Hive.openBox<Comprovante>(comprovantesBox);
-    await Hive.openBox<Usuario>(usuariosBox);
+    // Abrir boxes SOMENTE se ainda não estão abertas
+    if (!Hive.isBoxOpen(produtosBox)) {
+      await Hive.openBox<Produto>(produtosBox);
+    }
+    if (!Hive.isBoxOpen(notasFiscaisBox)) {
+      await Hive.openBox<NotaFiscal>(notasFiscaisBox);
+    }
+    if (!Hive.isBoxOpen(avaliacoesBox)) {
+      await Hive.openBox<Avaliacao>(avaliacoesBox);
+    }
+    if (!Hive.isBoxOpen(comprovantesBox)) {
+      await Hive.openBox<Comprovante>(comprovantesBox);
+    }
+    if (!Hive.isBoxOpen(usuariosBox)) {
+      await Hive.openBox<Usuario>(usuariosBox);
+    }
+
+    // ✅ Marcar como inicializado
+    _isInitialized = true;
+    print('✅ HiveService inicializado com sucesso!');
   }
 
   // Produtos
