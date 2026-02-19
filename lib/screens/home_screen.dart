@@ -35,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       // Verificar se Hive está inicializado
       if (!Hive.isBoxOpen('produtos')) {
-        await HiveService.init();
+        await Hive.openBox<Produto>('produtos');
       }
       
       setState(() {
