@@ -17,6 +17,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   bool _isInitialized = false;
   String _errorMessage = '';
+  bool _isInitializing = false; // 🔒 Evita múltiplas inicializações
 
   @override
   void initState() {
@@ -25,34 +26,68 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _initialize() async {
+    // 🔒 Evitar múltiplas chamadas simultâneas
+    if (_isInitializing) {
+      debugPrint('⚠️ Inicialização já em andamento, ignorando...');
+      return;
+    }
+
+    setState(() {
+      _isInitializing = true;
+      _errorMessage = '';
+    });
+
     try {
-      // 🔥 PASSO 1: Inicializar Firebase UMA VEZ
+      // 🔥 PASSO 1: Inicializar Firebase de forma segura
       if (Firebase.apps.isEmpty) {
+        debugPrint('🔥 Inicializando Firebase pela primeira vez...');
         await Firebase.initializeApp(
           options: DefaultFirebaseOptions.currentPlatform,
         );
         debugPrint('✅ Firebase inicializado com sucesso!');
       } else {
-        debugPrint('✅ Firebase já estava inicializado');
+        debugPrint('✅ Firebase já estava inicializado (${Firebase.apps.length} app(s) ativos)');
       }
 
-      // 📦 PASSO 2: Inicializar Hive DEPOIS do Firebase
+      // 🚪 PASSO 2: Fazer logout forçado de forma segura
+      try {
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser != null) {
+          debugPrint('🚪 Usuário detectado: ${currentUser.email}, fazendo logout...');
+          await FirebaseAuth.instance.signOut();
+          debugPrint('✅ Logout forçado executado com sucesso');
+        } else {
+          debugPrint('✅ Nenhum usuário logado, prosseguindo...');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Erro ao fazer logout (não crítico): $e');
+        // Não bloqueia a inicialização se o logout falhar
+      }
+
+      // 📦 PASSO 3: Inicializar Hive DEPOIS do Firebase
       await HiveService.init();
       debugPrint('✅ Hive inicializado com sucesso!');
 
-      // ✅ PASSO 3: Aguardar 1 segundo para garantir que tudo está pronto
+      // ✅ PASSO 4: Aguardar 1 segundo para garantir que tudo está pronto
       await Future.delayed(const Duration(seconds: 1));
 
-      setState(() {
-        _isInitialized = true;
-      });
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+          _isInitializing = false;
+        });
+        debugPrint('🎉 Inicialização completa! App pronto para uso.');
+      }
     } catch (e, stackTrace) {
       debugPrint('❌ Erro na inicialização: $e');
       debugPrint('Stack trace: $stackTrace');
       
-      setState(() {
-        _errorMessage = e.toString();
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString();
+          _isInitializing = false;
+        });
+      }
     }
   }
 
@@ -62,51 +97,77 @@ class _SplashScreenState extends State<SplashScreen> {
     if (_errorMessage.isNotEmpty) {
       return Scaffold(
         backgroundColor: const Color(0xFF6A1B9A),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.error_outline,
-                  color: Colors.white,
-                  size: 64,
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Erro ao inicializar o app',
-                  style: TextStyle(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.error_outline,
                     color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                    size: 64,
                   ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _errorMessage,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Erro ao inicializar o app',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: () {
-                    setState(() {
-                      _errorMessage = '';
-                    });
-                    _initialize();
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF6A1B9A),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _errorMessage.contains('duplicate-app')
+                          ? 'Firebase já inicializado. Por favor, feche o app completamente e abra novamente.'
+                          : _errorMessage,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
-                  child: const Text('Tentar Novamente'),
-                ),
-              ],
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: _isInitializing
+                        ? null
+                        : () {
+                            setState(() {
+                              _errorMessage = '';
+                            });
+                            _initialize();
+                          },
+                    icon: _isInitializing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Color(0xFF6A1B9A),
+                              ),
+                            ),
+                          )
+                        : const Icon(Icons.refresh),
+                    label: Text(_isInitializing ? 'Tentando...' : 'Tentar Novamente'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF6A1B9A),
+                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -117,105 +178,55 @@ class _SplashScreenState extends State<SplashScreen> {
     if (!_isInitialized) {
       return Scaffold(
         backgroundColor: const Color(0xFF6A1B9A),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Logo ou ícone do app
-              Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Logo ou ícone do app
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: const Icon(
+                    Icons.description_rounded,
+                    size: 64,
+                    color: Color(0xFF6A1B9A),
+                  ),
                 ),
-                child: const Icon(
-                  Icons.description_rounded,
-                  size: 64,
-                  color: Color(0xFF6A1B9A),
+                const SizedBox(height: 32),
+                const Text(
+                  'NotaOK',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 32),
-              const Text(
-                'NotaOK',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
+                const SizedBox(height: 48),
+                const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
-              ),
-              const SizedBox(height: 48),
-              const CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Inicializando...',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 16,
+                const SizedBox(height: 16),
+                const Text(
+                  'Inicializando...',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 16,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
     }
 
-    // ✅ Inicialização completa! Verificar autenticação
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        // Enquanto verifica autenticação, mantém splash
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Scaffold(
-            backgroundColor: const Color(0xFF6A1B9A),
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: const Icon(
-                      Icons.description_rounded,
-                      size: 64,
-                      color: Color(0xFF6A1B9A),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  const CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        // Se tem usuário logado
-        if (snapshot.hasData) {
-          final user = snapshot.data;
-
-          // Verificar se o email foi verificado
-          if (user != null && !user.emailVerified && !user.isAnonymous) {
-            return EmailVerificationScreen(
-              email: user.email ?? '',
-              userId: user.uid,
-            );
-          }
-
-          // Email verificado ou login anônimo, vai para home
-          return const HomeScreen();
-        }
-
-        // Não tem usuário, mostra login
-        return const LoginScreen();
-      },
-    );
+    // ✅ Inicialização completa! Mostrar tela de login diretamente
+    // (removemos o StreamBuilder para evitar problemas de autenticação)
+    return const LoginScreen();
   }
 }

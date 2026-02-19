@@ -1,21 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'splash_screen.dart';
 
 void main() {
-  // Configurar tratamento de erros
-  FlutterError.onError = (FlutterErrorDetails details) {
-    if (kDebugMode) {
-      debugPrint('Flutter Error: ${details.exception}');
-      debugPrint('Stack trace: ${details.stack}');
-    }
-  };
-
-  // Garantir inicialização do Flutter
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // 🚀 Iniciar o app DIRETAMENTE com o SplashScreen
-  // O SplashScreen vai cuidar de TODA a inicialização
+  // ✅ INICIALIZAÇÃO MÍNIMA - Todo o resto acontece no SplashScreen
   runApp(const NotaOKApp());
 }
 
@@ -28,31 +15,23 @@ class NotaOKApp extends StatelessWidget {
       title: 'NotaOK',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF6A1B9A),
-          primary: const Color(0xFF6A1B9A),
-          secondary: const Color(0xFFFF6F00),
+          brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: Colors.grey[50],
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 0,
-          backgroundColor: Color(0xFF6A1B9A),
-          foregroundColor: Colors.white,
-        ),
+        useMaterial3: true,
         cardTheme: CardThemeData(
           elevation: 2,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
           ),
         ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          elevation: 4,
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
         ),
       ),
-      // 🎯 INICIAR SEMPRE COM O SPLASHSCREEN
-      // Ele vai cuidar de Firebase, Hive e Autenticação
+      // ✅ APP SEMPRE INICIA NO SPLASHSCREEN
       home: const SplashScreen(),
     );
   }
