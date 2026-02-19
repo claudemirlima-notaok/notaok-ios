@@ -1,8 +1,58 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'firebase_options.dart';
+import 'services/hive_service.dart';
 import 'splash_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/email_verification_screen.dart';
 
-void main() {
-  // ✅ INICIALIZAÇÃO MÍNIMA - Todo o resto acontece no SplashScreen
+// ✅ NOVA: Flag global para controlar inicialização do Firebase
+bool _firebaseInitialized = false;
+
+void main() async {
+  // Configurar tratamento de erros
+  FlutterError.onError = (FlutterErrorDetails details) {
+    if (kDebugMode) {
+      debugPrint('Flutter Error: ${details.exception}');
+      debugPrint('Stack trace: ${details.stack}');
+    }
+  };
+
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  try {
+    // ✅ CORRIGIDO: Proteção dupla contra inicialização duplicada
+    if (!_firebaseInitialized && Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      _firebaseInitialized = true;
+      if (kDebugMode) {
+        debugPrint('✅ Firebase inicializado com sucesso');
+      }
+    } else {
+      if (kDebugMode) {
+        debugPrint('✅ Firebase já estava inicializado - SKIP inicialização');
+      }
+    }
+    
+    // Inicializar Hive (para cache local)
+    await HiveService.init();
+    
+    if (kDebugMode) {
+      debugPrint('✅ NotaOK inicializado com sucesso');
+    }
+  } catch (e, stackTrace) {
+    if (kDebugMode) {
+      debugPrint('❌ Erro ao inicializar: $e');
+      debugPrint('Stack trace: $stackTrace');
+    }
+    // Continue mesmo com erro - o app pode funcionar sem persistência
+  }
+  
   runApp(const NotaOKApp());
 }
 
@@ -15,24 +65,71 @@ class NotaOKApp extends StatelessWidget {
       title: 'NotaOK',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6A1B9A),
+          seedColor: const Color(0xFF9C27B0), // Roxo
+          secondary: const Color(0xFFFF6F00), // Laranja
           brightness: Brightness.light,
         ),
-        useMaterial3: true,
+        scaffoldBackgroundColor: Colors.grey[50],
+        appBarTheme: const AppBarTheme(
+          elevation: 0,
+          centerTitle: true,
+          backgroundColor: Color(0xFF9C27B0),
+          foregroundColor: Colors.white,
+        ),
         cardTheme: CardThemeData(
           elevation: 2,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
           ),
         ),
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 0,
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: Color(0xFFFF6F00),
+          foregroundColor: Colors.white,
         ),
       ),
-      // ✅ APP SEMPRE INICIA NO SPLASHSCREEN
-      home: const SplashScreen(),
+      // Usar StreamBuilder para reagir a mudanças de autenticação
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          // Enquanto carrega
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const SplashScreen();
+          }
+          
+          // Se tem usuário logado
+          if (snapshot.hasData && snapshot.data != null) {
+            final user = snapshot.data!;
+            
+            // ✅ CORRIGIDO: Não permitir usuários anônimos (visitante removido)
+            if (user.isAnonymous) {
+              // Se entrou como anônimo, força logout e volta para login
+              FirebaseAuth.instance.signOut();
+              return const LoginScreen();
+            }
+            
+            // Verificar se email foi verificado
+            if (!user.emailVerified && !user.isAnonymous) {
+              // Redirecionar para tela de verificação
+              return EmailVerificationScreen(
+                email: user.email ?? '',
+                userId: user.uid,
+              );
+            }
+            
+            // Email verificado ou login social, vai para Home
+            return const HomeScreen();
+          }
+          
+          // Senão, vai para Login
+          return const LoginScreen();
+        },
+      ),
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/home': (context) => const HomeScreen(),
+      },
     );
   }
 }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../services/auth_service.dart';
 import '../models/usuario.dart';
@@ -93,65 +92,45 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       if (_isLogin) {
         // LOGIN
-        final userCredential = await _authService.loginComEmail(
+        final usuario = await _authService.loginComEmail(
           email: _emailController.text.trim(),
           senha: _senhaController.text,
         );
 
-        if (userCredential != null && mounted) {
+        if (usuario != null && mounted) {
           Navigator.of(context).pushReplacementNamed('/home');
         }
       } else {
         // CADASTRO
-        // ✅ CORREÇÃO: Usar apenas email, senha e nomeCompleto
-        final userCredential = await _authService.cadastrarComEmail(
+        final resultado = await _authService.cadastrarComEmail(
+          nome: _nomeController.text.trim(),
           email: _emailController.text.trim(),
           senha: _senhaController.text,
-          nomeCompleto: _nomeController.text.trim(),
+          cpf: _cpfController.text,
+          telefone: _telefoneController.text,
+          dataNascimento: _dataNascimentoController.text.isNotEmpty
+              ? _dataNascimentoController.text
+              : null,
         );
 
-        if (userCredential != null && userCredential.user != null) {
-          // ✅ Salvar CPF e telefone no Firestore após cadastro
-          try {
-            await FirebaseFirestore.instance
-                .collection('usuarios')
-                .doc(userCredential.user!.uid)
-                .set({
-              'nome': _nomeController.text.trim(),
-              'email': _emailController.text.trim(),
-              'cpf': _cpfController.text,
-              'telefone': _telefoneController.text,
-              'dataNascimento': _dataNascimentoController.text.isNotEmpty
-                  ? _dataNascimentoController.text
-                  : null,
-              'createdAt': FieldValue.serverTimestamp(),
-              'updatedAt': FieldValue.serverTimestamp(),
-            });
-
-            debugPrint('✅ Dados do usuário salvos no Firestore');
-          } catch (e) {
-            debugPrint('⚠️ Erro ao salvar dados no Firestore: $e');
-          }
-
-          if (mounted) {
-            // Navegar para tela de verificação de email
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => EmailVerificationScreen(
-                  email: userCredential.user!.email!,
-                  userId: userCredential.user!.uid,
-                ),
+        if (resultado != null && mounted) {
+          // Navegar para tela de verificação de email
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EmailVerificationScreen(
+                email: resultado['email'],
+                userId: resultado['userId'],
               ),
-            );
-          }
+            ),
+          );
         }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString().replaceAll('Exception: ', '')),
+            content: Text('❌ ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -161,6 +140,78 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  // ✅ NOVO: Implementar recuperação de senha
+  Future<void> _mostrarDialogRecuperarSenha() async {
+    final emailController = TextEditingController();
+    
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Recuperar Senha'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Digite seu email para receber instruções de recuperação:'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.email),
+              ),
+              keyboardType: TextInputType.emailAddress,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final email = emailController.text.trim();
+              if (email.isEmpty || !email.contains('@')) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('❌ Digite um email válido'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              
+              Navigator.of(context).pop();
+              
+              try {
+                await _authService.recuperarSenha(email);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ Email de recuperação enviado para $email'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('❌ ${e.toString()}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loginComGoogle() async {
@@ -175,38 +226,19 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // ✅ CORREÇÃO: loginComGoogle não aceita parâmetros cpf e telefone
-      final userCredential = await _authService.loginComGoogle();
+      final usuario = await _authService.loginComGoogle(
+        cpf: cpfTelefone['cpf']!,
+        telefone: cpfTelefone['telefone']!,
+      );
 
-      if (userCredential != null && userCredential.user != null) {
-        // ✅ Salvar CPF e telefone no Firestore após login com Google
-        try {
-          await FirebaseFirestore.instance
-              .collection('usuarios')
-              .doc(userCredential.user!.uid)
-              .set({
-            'nome': userCredential.user!.displayName ?? 'Usuário Google',
-            'email': userCredential.user!.email!,
-            'cpf': cpfTelefone['cpf']!,
-            'telefone': cpfTelefone['telefone']!,
-            'createdAt': FieldValue.serverTimestamp(),
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-
-          debugPrint('✅ Dados do usuário Google salvos no Firestore');
-        } catch (e) {
-          debugPrint('⚠️ Erro ao salvar dados no Firestore: $e');
-        }
-
-        if (mounted) {
-          Navigator.of(context).pushReplacementNamed('/home');
-        }
+      if (usuario != null && mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString().replaceAll('Exception: ', '')),
+            content: Text('❌ ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -247,7 +279,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro no login com Apple: ${e.toString()}'),
+            content: Text('❌ Erro no login com Apple: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -257,74 +289,6 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => _isLoading = false);
       }
     }
-  }
-
-  Future<void> _recuperarSenha() async {
-    // Mostrar diálogo para inserir email
-    final emailController = TextEditingController();
-    
-    final resultado = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Recuperar Senha'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Digite seu email para receber um link de redefinição de senha:',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.email),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Enviar'),
-          ),
-        ],
-      ),
-    );
-
-    if (resultado == true && emailController.text.isNotEmpty) {
-      try {
-        await _authService.redefinirSenha(emailController.text.trim());
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Email de recuperação enviado! Verifique sua caixa de entrada.'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 5),
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(e.toString().replaceAll('Exception: ', '')),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
-
-    emailController.dispose();
   }
 
   @override
@@ -553,11 +517,11 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                           ),
 
-                          // Recuperar senha
+                          // ✅ CORRIGIDO: Recuperar senha agora funciona
                           if (_isLogin) ...[
                             const SizedBox(height: 16),
                             TextButton(
-                              onPressed: _recuperarSenha,
+                              onPressed: _mostrarDialogRecuperarSenha,
                               child: const Text('Esqueci minha senha'),
                             ),
                           ],
@@ -591,58 +555,13 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: Colors.black,
                             onPressed: _loginComApple,
                           ),
-                          const SizedBox(height: 12),
-                          _buildSocialButton(
-                            label: 'Continuar com Facebook',
-                            icon: Icons.facebook,
-                            color: const Color(0xFF1877F2),
-                            onPressed: () {
-                              // TODO: Implementar login com Facebook
-                            },
-                          ),
+                          // ✅ REMOVIDO: Botão Facebook (não configurado)
+                          // ✅ REMOVIDO: Botão "Entrar como Visitante" (linhas 489-539)
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  
-                  // Botão Entrar como Visitante (Autenticação Anônima Firebase)
-                  TextButton.icon(
-                    onPressed: () async {
-                      try {
-                        // Autenticação anônima no Firebase
-                        await FirebaseAuth.instance.signInAnonymously();
-                        if (mounted) {
-                          Navigator.of(context).pushReplacementNamed('/home');
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Erro ao entrar: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
-                      }
-                    },
-                    icon: const Icon(Icons.person_outline, color: Colors.white),
-                    label: const Text(
-                      'Entrar como Visitante',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      backgroundColor: Colors.white.withValues(alpha: 0.2),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
+                  // ✅ REMOVIDO: Botão "Entrar como Visitante" completo
                 ],
               ),
             ),
