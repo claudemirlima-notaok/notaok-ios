@@ -1,8 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
 
   // Obter usuário atual
   User? get currentUser => _auth.currentUser;
@@ -10,32 +12,30 @@ class AuthService {
   // Stream de mudanças de autenticação
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  /// Registrar novo usuário com tratamento de erros melhorado
-  Future<UserCredential?> registrarComEmailESenha({
+  /// Cadastrar novo usuário com email e senha (nome em português)
+  Future<UserCredential?> cadastrarComEmail({
     required String email,
     required String senha,
-    required String nomeCompleto,
+    String? nomeCompleto,
   }) async {
     try {
-      // Criar usuário
       final UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: senha,
       );
 
-      // Atualizar nome do usuário
-      await userCredential.user?.updateDisplayName(nomeCompleto);
+      if (nomeCompleto != null && nomeCompleto.isNotEmpty) {
+        await userCredential.user?.updateDisplayName(nomeCompleto);
+      }
       
-      // Enviar email de verificação
       await enviarEmailVerificacao();
       
       debugPrint('✅ Usuário registrado com sucesso: $email');
       return userCredential;
       
     } on FirebaseAuthException catch (e) {
-      debugPrint('❌ Erro no registro: ${e.code} - ${e.message}');
+      debugPrint('❌ Erro no cadastro: ${e.code} - ${e.message}');
       
-      // Lançar exceção com mensagem amigável em português
       switch (e.code) {
         case 'email-already-in-use':
           throw Exception('Este email já está cadastrado. Faça login ou use outro email.');
@@ -51,13 +51,13 @@ class AuthService {
           throw Exception('Erro ao criar conta: ${e.message ?? 'Erro desconhecido'}');
       }
     } catch (e) {
-      debugPrint('❌ Erro inesperado no registro: $e');
+      debugPrint('❌ Erro inesperado no cadastro: $e');
       throw Exception('Erro ao criar conta. Tente novamente mais tarde.');
     }
   }
 
-  /// Login com email e senha
-  Future<UserCredential?> loginComEmailESenha({
+  /// Login com email e senha (nome em português)
+  Future<UserCredential?> loginComEmail({
     required String email,
     required String senha,
   }) async {
@@ -95,7 +95,58 @@ class AuthService {
     }
   }
 
-  /// Enviar email de verificação com ActionCodeSettings personalizado
+  /// Login com Google (nome em português)
+  Future<UserCredential?> loginComGoogle() async {
+    try {
+      // Trigger the authentication flow
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      
+      if (googleUser == null) {
+        debugPrint('⚠️ Login com Google cancelado pelo usuário');
+        return null;
+      }
+
+      // Obtain the auth details from the request
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+
+      // Create a new credential
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // Sign in to Firebase with the Google credential
+      final UserCredential userCredential = await _auth.signInWithCredential(credential);
+      
+      debugPrint('✅ Login com Google realizado com sucesso: ${userCredential.user?.email}');
+      return userCredential;
+      
+    } on FirebaseAuthException catch (e) {
+      debugPrint('❌ Erro no login com Google: ${e.code} - ${e.message}');
+      
+      switch (e.code) {
+        case 'account-exists-with-different-credential':
+          throw Exception('Uma conta já existe com este email usando outro método de login.');
+        case 'invalid-credential':
+          throw Exception('Credenciais do Google inválidas. Tente novamente.');
+        case 'operation-not-allowed':
+          throw Exception('Login com Google não está habilitado. Entre em contato com o suporte.');
+        case 'user-disabled':
+          throw Exception('Esta conta foi desativada. Entre em contato com o suporte.');
+        case 'user-not-found':
+          throw Exception('Nenhuma conta encontrada com este email.');
+        case 'wrong-password':
+          throw Exception('Senha incorreta.');
+        default:
+          throw Exception('Erro ao fazer login com Google: ${e.message ?? 'Erro desconhecido'}');
+      }
+    } catch (e) {
+      debugPrint('❌ Erro inesperado no login com Google: $e');
+      throw Exception('Erro ao fazer login com Google. Tente novamente.');
+    }
+  }
+
+  /// Enviar email de verificação
   Future<void> enviarEmailVerificacao() async {
     try {
       final user = _auth.currentUser;
@@ -109,12 +160,11 @@ class AuthService {
         return;
       }
 
-      // Configurar ActionCodeSettings para email personalizado
       final actionCodeSettings = ActionCodeSettings(
         url: 'https://notaok-4d791.firebaseapp.com/__/auth/action',
         handleCodeInApp: false,
-        iOSBundleId: 'com.notaok.app',
-        androidPackageName: 'com.notaok.app',
+        iOSBundleId: 'com.warrantywizard.warranty',
+        androidPackageName: 'com.warrantywizard.warranty',
         androidInstallApp: true,
         androidMinimumVersion: '21',
       );
@@ -152,6 +202,7 @@ class AuthService {
   /// Fazer logout
   Future<void> logout() async {
     try {
+      await _googleSignIn.signOut();
       await _auth.signOut();
       debugPrint('✅ Logout realizado com sucesso');
     } catch (e) {
