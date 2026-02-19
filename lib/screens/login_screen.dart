@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import '../services/auth_service.dart';
 import '../models/usuario.dart';
@@ -92,45 +93,65 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       if (_isLogin) {
         // LOGIN
-        final usuario = await _authService.loginComEmail(
+        final userCredential = await _authService.loginComEmail(
           email: _emailController.text.trim(),
           senha: _senhaController.text,
         );
 
-        if (usuario != null && mounted) {
+        if (userCredential != null && mounted) {
           Navigator.of(context).pushReplacementNamed('/home');
         }
       } else {
         // CADASTRO
-        final resultado = await _authService.cadastrarComEmail(
-          nome: _nomeController.text.trim(),
+        // ✅ CORREÇÃO: Usar apenas email, senha e nomeCompleto
+        final userCredential = await _authService.cadastrarComEmail(
           email: _emailController.text.trim(),
           senha: _senhaController.text,
-          cpf: _cpfController.text,
-          telefone: _telefoneController.text,
-          dataNascimento: _dataNascimentoController.text.isNotEmpty
-              ? _dataNascimentoController.text
-              : null,
+          nomeCompleto: _nomeController.text.trim(),
         );
 
-        if (resultado != null && mounted) {
-          // Navegar para tela de verificação de email
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => EmailVerificationScreen(
-                email: resultado['email'],
-                userId: resultado['userId'],
+        if (userCredential != null && userCredential.user != null) {
+          // ✅ Salvar CPF e telefone no Firestore após cadastro
+          try {
+            await FirebaseFirestore.instance
+                .collection('usuarios')
+                .doc(userCredential.user!.uid)
+                .set({
+              'nome': _nomeController.text.trim(),
+              'email': _emailController.text.trim(),
+              'cpf': _cpfController.text,
+              'telefone': _telefoneController.text,
+              'dataNascimento': _dataNascimentoController.text.isNotEmpty
+                  ? _dataNascimentoController.text
+                  : null,
+              'createdAt': FieldValue.serverTimestamp(),
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+
+            debugPrint('✅ Dados do usuário salvos no Firestore');
+          } catch (e) {
+            debugPrint('⚠️ Erro ao salvar dados no Firestore: $e');
+          }
+
+          if (mounted) {
+            // Navegar para tela de verificação de email
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => EmailVerificationScreen(
+                  email: userCredential.user!.email!,
+                  userId: userCredential.user!.uid,
+                ),
               ),
-            ),
-          );
+            );
+          }
         }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ ${e.toString()}'),
+            content: Text(e.toString().replaceAll('Exception: ', '')),
             backgroundColor: Colors.red,
           ),
         );
@@ -154,19 +175,38 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final usuario = await _authService.loginComGoogle(
-        cpf: cpfTelefone['cpf']!,
-        telefone: cpfTelefone['telefone']!,
-      );
+      // ✅ CORREÇÃO: loginComGoogle não aceita parâmetros cpf e telefone
+      final userCredential = await _authService.loginComGoogle();
 
-      if (usuario != null && mounted) {
-        Navigator.of(context).pushReplacementNamed('/home');
+      if (userCredential != null && userCredential.user != null) {
+        // ✅ Salvar CPF e telefone no Firestore após login com Google
+        try {
+          await FirebaseFirestore.instance
+              .collection('usuarios')
+              .doc(userCredential.user!.uid)
+              .set({
+            'nome': userCredential.user!.displayName ?? 'Usuário Google',
+            'email': userCredential.user!.email!,
+            'cpf': cpfTelefone['cpf']!,
+            'telefone': cpfTelefone['telefone']!,
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+
+          debugPrint('✅ Dados do usuário Google salvos no Firestore');
+        } catch (e) {
+          debugPrint('⚠️ Erro ao salvar dados no Firestore: $e');
+        }
+
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ ${e.toString()}'),
+            content: Text(e.toString().replaceAll('Exception: ', '')),
             backgroundColor: Colors.red,
           ),
         );
@@ -207,7 +247,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Erro no login com Apple: ${e.toString()}'),
+            content: Text('Erro no login com Apple: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
