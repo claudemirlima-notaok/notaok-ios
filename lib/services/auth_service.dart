@@ -1,408 +1,204 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import '../models/usuario.dart';
-import 'hive_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+
+  // Obter usuário atual
+  User? get currentUser => _auth.currentUser;
 
   // Stream de mudanças de autenticação
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // Usuário atual
-  User? get currentUser => _auth.currentUser;
-
-  // Verifica se o usuário está logado
-  bool get isLoggedIn => currentUser != null;
-
-  // 1. CADASTRO POR EMAIL (SOMENTE cria no Auth, Firestore só após verificação)
-  Future<Map<String, dynamic>?> cadastrarComEmail({
-    required String nome,
+  /// Registrar novo usuário com tratamento de erros melhorado
+  Future<UserCredential?> registrarComEmailESenha({
     required String email,
     required String senha,
-    required String cpf,
-    required String telefone,
-    String? dataNascimento,
+    required String nomeCompleto,
   }) async {
     try {
-      // Valida CPF antes de cadastrar
-      if (!Usuario.validarCPF(cpf)) {
-        throw Exception('CPF inválido');
-      }
-
-      // Remove formatação do CPF
-      final cpfLimpo = cpf.replaceAll(RegExp(r'[^0-9]'), '');
-
-      // Verifica se CPF já está cadastrado
-      final cpfExiste = await _verificarCPFExistente(cpfLimpo);
-      if (cpfExiste) {
-        throw Exception('CPF já cadastrado');
-      }
-
-      // Cria usuário no Firebase Auth
-      final UserCredential userCredential =
-          await _auth.createUserWithEmailAndPassword(
+      // Criar usuário
+      final UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: senha,
       );
 
-      // Salva dados temporários no Firestore (coleção temp_usuarios)
-      // Serão movidos para 'usuarios' após verificação
-      await _firestore.collection('temp_usuarios').doc(userCredential.user!.uid).set({
-        'nome': nome,
-        'email': email,
-        'cpf': cpfLimpo,
-        'telefone': telefone,
-        'dataNascimento': dataNascimento,
-        'tipoLogin': 'email',
-        'emailVerificado': false,
-        'criadoEm': FieldValue.serverTimestamp(),
-      });
-
-      if (kDebugMode) {
-        debugPrint('✅ Usuário criado no Auth (aguardando verificação): $email');
-        debugPrint('📧 Código de verificação será enviado via Cloud Function');
-      }
-
-      // Retorna dados para a tela de verificação
-      return {
-        'userId': userCredential.user!.uid,
-        'email': email,
-        'nome': nome,
-        'cpf': cpfLimpo,
-        'telefone': telefone,
-        'dataNascimento': dataNascimento,
-      };
+      // Atualizar nome do usuário
+      await userCredential.user?.updateDisplayName(nomeCompleto);
+      
+      // Enviar email de verificação
+      await enviarEmailVerificacao();
+      
+      debugPrint('✅ Usuário registrado com sucesso: $email');
+      return userCredential;
+      
     } on FirebaseAuthException catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao cadastrar: ${e.code}');
-      }
+      debugPrint('❌ Erro no registro: ${e.code} - ${e.message}');
+      
+      // Lançar exceção com mensagem amigável em português
       switch (e.code) {
         case 'email-already-in-use':
-          throw Exception('Email já está em uso');
+          throw Exception('Este email já está cadastrado. Faça login ou use outro email.');
         case 'weak-password':
-          throw Exception('Senha muito fraca. Use no mínimo 6 caracteres');
+          throw Exception('A senha é muito fraca. Use pelo menos 6 caracteres.');
         case 'invalid-email':
-          throw Exception('Email inválido');
+          throw Exception('O email informado é inválido. Verifique e tente novamente.');
+        case 'operation-not-allowed':
+          throw Exception('Cadastro com email/senha não está habilitado. Entre em contato com o suporte.');
+        case 'network-request-failed':
+          throw Exception('Erro de conexão. Verifique sua internet e tente novamente.');
         default:
-          throw Exception('Erro ao cadastrar: ${e.message}');
+          throw Exception('Erro ao criar conta: ${e.message ?? 'Erro desconhecido'}');
       }
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao cadastrar: $e');
-      }
-      rethrow;
+      debugPrint('❌ Erro inesperado no registro: $e');
+      throw Exception('Erro ao criar conta. Tente novamente mais tarde.');
     }
   }
 
-
-  // Confirmar verificação de email e mover dados para coleção principal
-  Future<Usuario?> confirmarVerificacaoEmail(String userId) async {
-    try {
-      // Buscar dados temporários
-      final tempDoc = await _firestore.collection('temp_usuarios').doc(userId).get();
-      
-      if (!tempDoc.exists) {
-        throw Exception('Dados do usuário não encontrados');
-      }
-      
-      final dados = tempDoc.data()!;
-      
-      // Criar objeto Usuario
-      final usuario = Usuario(
-        id: userId,
-        nome: dados['nome'],
-        email: dados['email'],
-        cpf: dados['cpf'],
-        telefone: dados['telefone'],
-        dataNascimento: dados['dataNascimento'],
-        tipoLogin: dados['tipoLogin'],
-        emailVerificado: true,
-      );
-      
-      // Salvar na coleção principal
-      await _salvarUsuarioFirestore(usuario);
-      
-      // Salvar localmente
-      await HiveService.salvarUsuario(usuario);
-      
-      // Deletar dados temporários
-      await _firestore.collection('temp_usuarios').doc(userId).delete();
-      
-      if (kDebugMode) {
-        debugPrint('✅ Email verificado! Usuário movido para coleção principal');
-      }
-      
-      return usuario;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao confirmar verificação: $e');
-      }
-      rethrow;
-    }
-  }
-
-  // 2. LOGIN COM EMAIL
-  Future<Usuario?> loginComEmail({
+  /// Login com email e senha
+  Future<UserCredential?> loginComEmailESenha({
     required String email,
     required String senha,
   }) async {
     try {
-      final UserCredential userCredential =
-          await _auth.signInWithEmailAndPassword(
+      final UserCredential userCredential = await _auth.signInWithEmailAndPassword(
         email: email,
         password: senha,
       );
-
-      // Busca dados do usuário no Firestore
-      final usuario = await _buscarUsuarioFirestore(userCredential.user!.uid);
-
-      if (usuario != null) {
-        // Salva localmente
-        await HiveService.salvarUsuario(usuario);
-      }
-
-      if (kDebugMode) {
-        debugPrint('✅ Login realizado com sucesso');
-      }
-
-      return usuario;
+      
+      debugPrint('✅ Login realizado com sucesso: $email');
+      return userCredential;
+      
     } on FirebaseAuthException catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao fazer login: ${e.code}');
-      }
+      debugPrint('❌ Erro no login: ${e.code} - ${e.message}');
+      
       switch (e.code) {
         case 'user-not-found':
-          throw Exception('Usuário não encontrado');
+          throw Exception('Email não cadastrado. Verifique ou crie uma nova conta.');
         case 'wrong-password':
-          throw Exception('Senha incorreta');
+          throw Exception('Senha incorreta. Tente novamente ou recupere sua senha.');
         case 'invalid-email':
-          throw Exception('Email inválido');
+          throw Exception('O email informado é inválido.');
         case 'user-disabled':
-          throw Exception('Usuário desabilitado');
+          throw Exception('Esta conta foi desativada. Entre em contato com o suporte.');
+        case 'too-many-requests':
+          throw Exception('Muitas tentativas de login. Aguarde alguns minutos e tente novamente.');
+        case 'network-request-failed':
+          throw Exception('Erro de conexão. Verifique sua internet.');
         default:
-          throw Exception('Erro ao fazer login: ${e.message}');
+          throw Exception('Erro ao fazer login: ${e.message ?? 'Erro desconhecido'}');
       }
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao fazer login: $e');
-      }
-      rethrow;
+      debugPrint('❌ Erro inesperado no login: $e');
+      throw Exception('Erro ao fazer login. Tente novamente.');
     }
   }
 
-  // 3. LOGIN COM GOOGLE
-  Future<Usuario?> loginComGoogle({
-    required String cpf,
-    required String telefone,
-  }) async {
+  /// Enviar email de verificação com ActionCodeSettings personalizado
+  Future<void> enviarEmailVerificacao() async {
     try {
-      // Valida CPF
-      if (!Usuario.validarCPF(cpf)) {
-        throw Exception('CPF inválido');
+      final user = _auth.currentUser;
+      
+      if (user == null) {
+        throw Exception('Nenhum usuário logado.');
       }
 
-      final cpfLimpo = cpf.replaceAll(RegExp(r'[^0-9]'), '');
-
-      // Faz login com Google
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        throw Exception('Login com Google cancelado');
+      if (user.emailVerified) {
+        debugPrint('✅ Email já verificado');
+        return;
       }
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+      // Configurar ActionCodeSettings para email personalizado
+      final actionCodeSettings = ActionCodeSettings(
+        url: 'https://notaok-4d791.firebaseapp.com/__/auth/action',
+        handleCodeInApp: false,
+        iOSBundleId: 'com.notaok.app',
+        androidPackageName: 'com.notaok.app',
+        androidInstallApp: true,
+        androidMinimumVersion: '21',
       );
 
-      final UserCredential userCredential =
-          await _auth.signInWithCredential(credential);
-
-      // Verifica se é primeiro login
-      Usuario? usuario = await _buscarUsuarioFirestore(userCredential.user!.uid);
-
-      if (usuario == null) {
-        // Primeiro login - criar perfil
-        usuario = Usuario(
-          id: userCredential.user!.uid,
-          nome: userCredential.user!.displayName ?? 'Usuário Google',
-          email: userCredential.user!.email ?? '',
-          cpf: cpfLimpo,
-          telefone: telefone,
-          foto: userCredential.user!.photoURL,
-          tipoLogin: 'google',
-          emailVerificado: true,
-        );
-
-        await _salvarUsuarioFirestore(usuario);
-      }
-
-      // Salva localmente
-      await HiveService.salvarUsuario(usuario);
-
-      if (kDebugMode) {
-        debugPrint('✅ Login com Google realizado com sucesso');
-      }
-
-      return usuario;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro no login com Google: $e');
-      }
-      rethrow;
-    }
-  }
-
-  // 4. REENVIAR EMAIL DE VERIFICAÇÃO
-  Future<void> reenviarEmailVerificacao() async {
-    try {
-      final user = currentUser;
-      if (user != null && !user.emailVerified) {
-        await user.sendEmailVerification();
-        if (kDebugMode) {
-          debugPrint('📧 Email de verificação reenviado');
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao reenviar email: $e');
-      }
-      rethrow;
-    }
-  }
-
-  // 5. RECUPERAR SENHA
-  Future<void> recuperarSenha(String email) async {
-    try {
-      await _auth.sendPasswordResetEmail(email: email);
-      if (kDebugMode) {
-        debugPrint('📧 Email de recuperação enviado');
-      }
+      await user.sendEmailVerification(actionCodeSettings);
+      
+      debugPrint('✅ Email de verificação enviado para: ${user.email}');
     } on FirebaseAuthException catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao recuperar senha: ${e.code}');
-      }
+      debugPrint('❌ Erro ao enviar email de verificação: ${e.code} - ${e.message}');
+      
       switch (e.code) {
-        case 'user-not-found':
-          throw Exception('Usuário não encontrado');
+        case 'too-many-requests':
+          throw Exception('Muitos emails enviados. Aguarde alguns minutos e tente novamente.');
         case 'invalid-email':
-          throw Exception('Email inválido');
+          throw Exception('Email inválido.');
         default:
-          throw Exception('Erro ao recuperar senha: ${e.message}');
+          throw Exception('Erro ao enviar email: ${e.message ?? 'Erro desconhecido'}');
       }
+    } catch (e) {
+      debugPrint('❌ Erro inesperado ao enviar email: $e');
+      throw Exception('Erro ao enviar email de verificação.');
     }
   }
 
-  // 6. LOGOUT
+  /// Recarregar dados do usuário
+  Future<void> recarregarUsuario() async {
+    try {
+      await _auth.currentUser?.reload();
+      debugPrint('✅ Dados do usuário recarregados');
+    } catch (e) {
+      debugPrint('❌ Erro ao recarregar usuário: $e');
+    }
+  }
+
+  /// Fazer logout
   Future<void> logout() async {
     try {
       await _auth.signOut();
-      await _googleSignIn.signOut();
-      await HiveService.limparUsuario();
-      if (kDebugMode) {
-        debugPrint('✅ Logout realizado com sucesso');
-      }
+      debugPrint('✅ Logout realizado com sucesso');
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao fazer logout: $e');
-      }
-      rethrow;
+      debugPrint('❌ Erro ao fazer logout: $e');
+      throw Exception('Erro ao sair da conta.');
     }
   }
 
-  // 7. ATUALIZAR DADOS DO USUÁRIO
-  Future<void> atualizarUsuario(Usuario usuario) async {
+  /// Redefinir senha
+  Future<void> redefinirSenha(String email) async {
     try {
-      usuario.ultimaAtualizacao = DateTime.now();
+      await _auth.sendPasswordResetEmail(email: email);
+      debugPrint('✅ Email de redefinição de senha enviado para: $email');
+    } on FirebaseAuthException catch (e) {
+      debugPrint('❌ Erro ao enviar email de redefinição: ${e.code} - ${e.message}');
       
-      // Atualiza no Firestore
-      await _salvarUsuarioFirestore(usuario);
+      switch (e.code) {
+        case 'user-not-found':
+          throw Exception('Email não cadastrado.');
+        case 'invalid-email':
+          throw Exception('Email inválido.');
+        default:
+          throw Exception('Erro ao enviar email: ${e.message ?? 'Erro desconhecido'}');
+      }
+    } catch (e) {
+      debugPrint('❌ Erro inesperado ao redefinir senha: $e');
+      throw Exception('Erro ao enviar email de recuperação.');
+    }
+  }
+
+  /// Deletar conta
+  Future<void> deletarConta() async {
+    try {
+      await _auth.currentUser?.delete();
+      debugPrint('✅ Conta deletada com sucesso');
+    } on FirebaseAuthException catch (e) {
+      debugPrint('❌ Erro ao deletar conta: ${e.code} - ${e.message}');
       
-      // Atualiza localmente
-      await HiveService.salvarUsuario(usuario);
-
-      if (kDebugMode) {
-        debugPrint('✅ Usuário atualizado com sucesso');
+      switch (e.code) {
+        case 'requires-recent-login':
+          throw Exception('Por segurança, faça login novamente antes de deletar sua conta.');
+        default:
+          throw Exception('Erro ao deletar conta: ${e.message ?? 'Erro desconhecido'}');
       }
     } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao atualizar usuário: $e');
-      }
-      rethrow;
+      debugPrint('❌ Erro inesperado ao deletar conta: $e');
+      throw Exception('Erro ao deletar conta.');
     }
-  }
-
-  // MÉTODOS AUXILIARES PRIVADOS
-
-  // Verifica se CPF já existe
-  Future<bool> _verificarCPFExistente(String cpf) async {
-    try {
-      final querySnapshot = await _firestore
-          .collection('usuarios')
-          .where('cpf', isEqualTo: cpf)
-          .get();
-      return querySnapshot.docs.isNotEmpty;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao verificar CPF: $e');
-      }
-      return false;
-    }
-  }
-
-  // Salva usuário no Firestore
-  Future<void> _salvarUsuarioFirestore(Usuario usuario) async {
-    try {
-      await _firestore
-          .collection('usuarios')
-          .doc(usuario.id)
-          .set(usuario.toMap());
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao salvar no Firestore: $e');
-      }
-      rethrow;
-    }
-  }
-
-  // Busca usuário no Firestore
-  Future<Usuario?> _buscarUsuarioFirestore(String uid) async {
-    try {
-      final doc = await _firestore.collection('usuarios').doc(uid).get();
-      if (doc.exists) {
-        return Usuario.fromMap(doc.data()!);
-      }
-      return null;
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('❌ Erro ao buscar usuário: $e');
-      }
-      return null;
-    }
-  }
-
-  // Busca usuário atual
-  Future<Usuario?> buscarUsuarioAtual() async {
-    if (!isLoggedIn) return null;
-    
-    // Tenta buscar localmente primeiro
-    Usuario? usuario = HiveService.getUsuarioAtual();
-    
-    // Se não encontrar localmente, busca no Firestore
-    if (usuario == null && currentUser != null) {
-      usuario = await _buscarUsuarioFirestore(currentUser!.uid);
-      if (usuario != null) {
-        await HiveService.salvarUsuario(usuario);
-      }
-    }
-    
-    return usuario;
   }
 }

@@ -17,7 +17,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   bool _isInitialized = false;
   String _errorMessage = '';
-  bool _isInitializing = false; // 🔒 Evita múltiplas inicializações
+  bool _isInitializing = false;
 
   @override
   void initState() {
@@ -26,7 +26,6 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _initialize() async {
-    // 🔒 Evitar múltiplas chamadas simultâneas
     if (_isInitializing) {
       debugPrint('⚠️ Inicialização já em andamento, ignorando...');
       return;
@@ -38,15 +37,18 @@ class _SplashScreenState extends State<SplashScreen> {
     });
 
     try {
-      // 🔥 PASSO 1: Inicializar Firebase de forma segura
-      if (Firebase.apps.isEmpty) {
-        debugPrint('🔥 Inicializando Firebase pela primeira vez...');
+      // 🔥 PASSO 1: Garantir que Firebase está inicializado (SEM tentar reinicializar)
+      try {
         await Firebase.initializeApp(
           options: DefaultFirebaseOptions.currentPlatform,
         );
         debugPrint('✅ Firebase inicializado com sucesso!');
-      } else {
-        debugPrint('✅ Firebase já estava inicializado (${Firebase.apps.length} app(s) ativos)');
+      } on FirebaseException catch (e) {
+        if (e.code == 'duplicate-app') {
+          debugPrint('✅ Firebase já estava inicializado - OK!');
+        } else {
+          rethrow;
+        }
       }
 
       // 🚪 PASSO 2: Fazer logout forçado de forma segura
@@ -61,15 +63,14 @@ class _SplashScreenState extends State<SplashScreen> {
         }
       } catch (e) {
         debugPrint('⚠️ Erro ao fazer logout (não crítico): $e');
-        // Não bloqueia a inicialização se o logout falhar
       }
 
-      // 📦 PASSO 3: Inicializar Hive DEPOIS do Firebase
+      // 📦 PASSO 3: Inicializar Hive
       await HiveService.init();
       debugPrint('✅ Hive inicializado com sucesso!');
 
-      // ✅ PASSO 4: Aguardar 1 segundo para garantir que tudo está pronto
-      await Future.delayed(const Duration(seconds: 1));
+      // ✅ PASSO 4: Aguardar 5 segundos para garantir que tudo está pronto (UX melhorada)
+      await Future.delayed(const Duration(seconds: 5));
 
       if (mounted) {
         setState(() {
@@ -84,7 +85,7 @@ class _SplashScreenState extends State<SplashScreen> {
       
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = 'Erro ao inicializar o app. Por favor, feche o app completamente e abra novamente.';
           _isInitializing = false;
         });
       }
@@ -127,9 +128,7 @@ class _SplashScreenState extends State<SplashScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      _errorMessage.contains('duplicate-app')
-                          ? 'Firebase já inicializado. Por favor, feche o app completamente e abra novamente.'
-                          : _errorMessage,
+                      _errorMessage,
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 14,
@@ -142,10 +141,12 @@ class _SplashScreenState extends State<SplashScreen> {
                     onPressed: _isInitializing
                         ? null
                         : () {
-                            setState(() {
-                              _errorMessage = '';
-                            });
-                            _initialize();
+                            if (mounted) {
+                              setState(() {
+                                _errorMessage = '';
+                              });
+                              _initialize();
+                            }
                           },
                     icon: _isInitializing
                         ? const SizedBox(
@@ -159,7 +160,7 @@ class _SplashScreenState extends State<SplashScreen> {
                             ),
                           )
                         : const Icon(Icons.refresh),
-                    label: Text(_isInitializing ? 'Tentando...' : 'Tentar Novamente'),
+                    label: Text(_isInitializing ? 'Tentando...' : 'Fechar app e abrir novamente'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: const Color(0xFF6A1B9A),
@@ -183,7 +184,6 @@ class _SplashScreenState extends State<SplashScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo ou ícone do app
                 Container(
                   width: 120,
                   height: 120,
@@ -226,7 +226,6 @@ class _SplashScreenState extends State<SplashScreen> {
     }
 
     // ✅ Inicialização completa! Mostrar tela de login diretamente
-    // (removemos o StreamBuilder para evitar problemas de autenticação)
     return const LoginScreen();
   }
 }
