@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:qr_code_scanner/qr_code_scanner.dart';
 import '../services/nfe_service.dart';
 import '../services/hive_service.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/ocr_service.dart';
 import 'selecao_produtos_screen.dart';
-
-// QR Code Scanner só funciona em mobile
-dynamic _qrCodeScanner;
-dynamic _qrViewController;
 
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
@@ -19,9 +16,18 @@ class ScannerScreen extends StatefulWidget {
 
 class _ScannerScreenState extends State<ScannerScreen> {
   final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
-  dynamic controller;
+  QRViewController? controller;
   bool isProcessing = false;
   bool flashEnabled = false;
+
+  @override
+  void reassemble() {
+    super.reassemble();
+    if (!kIsWeb && controller != null) {
+      controller!.pauseCamera();
+      controller!.resumeCamera();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +40,19 @@ class _ScannerScreenState extends State<ScannerScreen> {
             fontSize: 20,
           ),
         ),
-        centerTitle: false,
+        centerTitle: true,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Theme.of(context).colorScheme.primary,
+                Theme.of(context).colorScheme.secondary,
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
         actions: [
           IconButton(
             icon: Icon(flashEnabled ? Icons.flash_on : Icons.flash_off),
@@ -92,7 +110,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                           Icon(
                             Icons.qr_code_scanner_rounded,
                             size: 100,
-                            color: Colors.white.withValues(alpha: 0.3),
+                            color: Colors.white.withOpacity(0.3),
                           ),
                           const SizedBox(height: 24),
                           Text(
@@ -118,13 +136,15 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   )
                 : Stack(
                     children: [
-                      Container(
-                        color: Colors.black,
-                        child: const Center(
-                          child: Text(
-                            'QR Scanner (Mobile Only)',
-                            style: TextStyle(color: Colors.white),
-                          ),
+                      QRView(
+                        key: qrKey,
+                        onQRViewCreated: _onQRViewCreated,
+                        overlay: QrScannerOverlayShape(
+                          borderColor: Theme.of(context).colorScheme.secondary,
+                          borderRadius: 16,
+                          borderLength: 40,
+                          borderWidth: 10,
+                          cutOutSize: MediaQuery.of(context).size.width * 0.7,
                         ),
                       ),
                       if (isProcessing)
@@ -204,10 +224,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
-  void _onQRViewCreated(dynamic controller) {
-    // QR View creation - mobile only
+  void _onQRViewCreated(QRViewController controller) {
     if (!kIsWeb) {
       this.controller = controller;
+      controller.scannedDataStream.listen((scanData) {
+        if (!isProcessing && scanData.code != null) {
+          _processarQRCode(scanData.code!);
+        }
+      });
     }
   }
 
@@ -218,7 +242,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
     try {
       if (!kIsWeb && controller != null) {
-        // Pause camera on mobile
+        await controller!.pauseCamera();
       }
 
       final notaFiscal = await NFeService.processarQRCodeNFe(qrCode);
@@ -256,7 +280,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
         isProcessing = false;
       });
       if (!kIsWeb && controller != null) {
-        // Resume camera on mobile
+        await controller!.resumeCamera();
       }
     }
   }
@@ -324,21 +348,16 @@ class _ScannerScreenState extends State<ScannerScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (comprovante.estabelecimento != null) ...[
+              if (comprovante.estabelecimento != null)
                 _buildInfoRow('Estabelecimento:', comprovante.estabelecimento!),
-              ],
-              if (comprovante.valor != null) ...[
+              if (comprovante.valor != null)
                 _buildInfoRow('Valor:', 'R\$ ${comprovante.valor!.toStringAsFixed(2)}'),
-              ],
-              if (comprovante.cartaoCredito != null) ...[
+              if (comprovante.cartaoCredito != null)
                 _buildInfoRow('Cartão:', '**** ${comprovante.cartaoCredito}'),
-              ],
-              if (comprovante.bandeira != null) ...[
+              if (comprovante.bandeira != null)
                 _buildInfoRow('Bandeira:', comprovante.bandeira!),
-              ],
-              if (comprovante.produto != null) ...[
+              if (comprovante.produto != null)
                 _buildInfoRow('Produto:', comprovante.produto!),
-              ],
             ],
           ),
         ),
@@ -373,9 +392,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
   @override
   void dispose() {
-    if (!kIsWeb && controller != null) {
-      // Dispose controller on mobile
-    }
+    controller?.dispose();
     super.dispose();
   }
 }

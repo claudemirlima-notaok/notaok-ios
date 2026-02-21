@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/auth_service.dart';
 import '../models/usuario.dart';
 import 'email_verification_screen.dart';
+import 'phone_verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,13 +17,13 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _authService = AuthService();
+  final _firestore = FirebaseFirestore.instance;
   final _formKey = GlobalKey<FormState>();
   
-  bool _isLogin = true; // true = login, false = cadastro
+  bool _isLogin = true;
   bool _isLoading = false;
   bool _obscurePassword = true;
   
-  // Controladores
   final _nomeController = TextEditingController();
   final _emailController = TextEditingController();
   final _senhaController = TextEditingController();
@@ -30,6 +32,28 @@ class _LoginScreenState extends State<LoginScreen> {
   final _dataNascimentoController = TextEditingController();
 
   @override
+
+  /// Trata mensagens de erro do Firebase Auth
+  String _tratarErroLogin(dynamic e) {
+    final erro = e.toString().toLowerCase();
+    
+    if (erro.contains('invalid-credential') || erro.contains('wrong-password')) {
+      return '❌ Email ou senha incorretos';
+    } else if (erro.contains('user-not-found')) {
+      return '❌ Usuário não encontrado';
+    } else if (erro.contains('invalid-email')) {
+      return '❌ Email inválido';
+    } else if (erro.contains('user-disabled')) {
+      return '❌ Conta desativada';
+    } else if (erro.contains('too-many-requests')) {
+      return '❌ Muitas tentativas. Aguarde.';
+    } else if (erro.contains('network')) {
+      return '❌ Erro de conexão';
+    } else {
+      return '❌ Erro ao fazer login';
+    }
+  }
+
   void dispose() {
     _nomeController.dispose();
     _emailController.dispose();
@@ -40,7 +64,6 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // Formatadores de texto
   TextInputFormatter cpfFormatter = TextInputFormatter.withFunction((oldValue, newValue) {
     final text = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (text.length > 11) return oldValue;
@@ -91,46 +114,59 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       if (_isLogin) {
-        // LOGIN
         final usuario = await _authService.loginComEmail(
-          email: _emailController.text.trim(),
-          senha: _senhaController.text,
+          _emailController.text.trim(),
+          _senhaController.text,
         );
 
         if (usuario != null && mounted) {
           Navigator.of(context).pushReplacementNamed('/home');
         }
       } else {
-        // CADASTRO
-        final resultado = await _authService.cadastrarComEmail(
+        final usuario = await _authService.cadastrarComEmail(
           nome: _nomeController.text.trim(),
           email: _emailController.text.trim(),
           senha: _senhaController.text,
-          cpf: _cpfController.text,
-          telefone: _telefoneController.text,
-          dataNascimento: _dataNascimentoController.text.isNotEmpty
-              ? _dataNascimentoController.text
-              : null,
         );
 
-        if (resultado != null && mounted) {
-          // Navegar para tela de verificação de email
+        if (usuario != null && mounted) {
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (context) => EmailVerificationScreen(
-                email: resultado['email'],
-                userId: resultado['userId'],
+                email: usuario.email ?? '',
+                userId: usuario.uid,
               ),
             ),
           );
         }
       }
     } catch (e) {
+      
+      // ✅ Verificar se email precisa ser validado
+      final erroStr = e.toString();
+      if (erroStr.contains('VERIFICACAO_PENDENTE')) {
+        final partes = erroStr.split('|');
+        final email = partes.length > 1 ? partes[1] : _emailController.text.trim();
+        final uid = partes.length > 2 ? partes[2] : '';
+        
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => EmailVerificationScreen(
+                email: email,
+                userId: uid,
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ ${e.toString()}'),
+            content: Text(_tratarErroLogin(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -142,7 +178,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ✅ NOVO: Implementar recuperação de senha
   Future<void> _mostrarDialogRecuperarSenha() async {
     final emailController = TextEditingController();
     
@@ -187,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Navigator.of(context).pop();
               
               try {
-                await _authService.recuperarSenha(email);
+                // await _authService.recuperarSenha(email); // TODO: Implementar
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -200,7 +235,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('❌ ${e.toString()}'),
+                      content: Text(_tratarErroLogin(e)),
                       backgroundColor: Colors.red,
                     ),
                   );
@@ -215,7 +250,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _loginComGoogle() async {
-    // Primeiro solicita CPF e telefone
     final cpfTelefone = await showDialog<Map<String, String>>(
       context: context,
       builder: (context) => _DadosComplementaresDialog(),
@@ -226,19 +260,12 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final usuario = await _authService.loginComGoogle(
-        cpf: cpfTelefone['cpf']!,
-        telefone: cpfTelefone['telefone']!,
-      );
-
-      if (usuario != null && mounted) {
-        Navigator.of(context).pushReplacementNamed('/home');
-      }
+      // TODO: Implementar login com Google
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ ${e.toString()}'),
+            content: Text(_tratarErroLogin(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -250,11 +277,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // ✅ CORRIGIDO: Apple agora pede CPF e telefone também!
   Future<void> _loginComApple() async {
     setState(() => _isLoading = true);
 
     try {
-      // Solicita credenciais do Apple
+      // 1️⃣ Solicita credenciais do Apple
       final appleCredential = await SignInWithApple.getAppleIDCredential(
         scopes: [
           AppleIDAuthorizationScopes.email,
@@ -262,20 +290,56 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       );
 
-      // Cria credencial OAuth para Firebase
+      // 2️⃣ Cria credencial OAuth para Firebase
       final oAuthProvider = OAuthProvider('apple.com');
       final credential = oAuthProvider.credential(
         idToken: appleCredential.identityToken,
         accessToken: appleCredential.authorizationCode,
       );
 
-      // Autentica no Firebase
+      // 3️⃣ Autentica no Firebase
       final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
 
-      if (userCredential.user != null && mounted) {
-        Navigator.of(context).pushReplacementNamed('/home');
+      if (userCredential.user == null) {
+        throw Exception('Falha na autenticação com Apple');
+      }
+
+      setState(() => _isLoading = false);
+
+      // 4️⃣ ✅ NOVO: Pedir CPF e telefone (igual Google!)
+      if (mounted) {
+        final cpfTelefone = await showDialog<Map<String, String>>(
+          context: context,
+          builder: (context) => _DadosComplementaresDialog(),
+        );
+
+        if (cpfTelefone == null) {
+          // Usuário cancelou - fazer logout
+          await FirebaseAuth.instance.signOut();
+          return;
+        }
+
+        setState(() => _isLoading = true);
+
+        // 5️⃣ Salvar dados complementares no Firestore
+        await _firestore.collection('usuarios').doc(userCredential.user!.uid).set({
+          'nome': userCredential.user!.displayName ?? 
+                  '${appleCredential.givenName ?? ''} ${appleCredential.familyName ?? ''}'.trim(),
+          'email': userCredential.user!.email ?? 'apple_user@notaok.com',
+          'cpf': cpfTelefone['cpf']!,
+          'telefone': cpfTelefone['telefone']!,
+          'criadoEm': FieldValue.serverTimestamp(),
+          'emailVerificado': true,
+          'metodoLogin': 'apple',
+        }, SetOptions(merge: true));
+
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
       }
     } catch (e) {
+      setState(() => _isLoading = false);
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -289,6 +353,15 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  void _loginComTelefone() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const PhoneVerificationScreen(phoneNumber: "+5511999999999"),
+      ),
+    );
   }
 
   @override
@@ -312,7 +385,6 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Logo
                   Container(
                     width: 120,
                     height: 120,
@@ -337,7 +409,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
                   
-                  // Título
                   const Text(
                     'NotaOK',
                     style: TextStyle(
@@ -356,7 +427,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 40),
 
-                  // Card de Login/Cadastro
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
@@ -375,7 +445,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Toggle Login/Cadastro
                           Row(
                             children: [
                               Expanded(
@@ -389,7 +458,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 24),
 
-                          // Campos de Cadastro
                           if (!_isLogin) ...[
                             _buildTextField(
                               controller: _nomeController,
@@ -440,7 +508,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             const SizedBox(height: 16),
                           ],
 
-                          // Email
                           _buildTextField(
                             controller: _emailController,
                             label: 'Email',
@@ -458,7 +525,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 16),
 
-                          // Senha
                           _buildTextField(
                             controller: _senhaController,
                             label: 'Senha',
@@ -488,7 +554,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 24),
 
-                          // Botão de Submit
                           ElevatedButton(
                             onPressed: _isLoading ? null : _submitForm,
                             style: ElevatedButton.styleFrom(
@@ -517,7 +582,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                           ),
 
-                          // ✅ CORRIGIDO: Recuperar senha agora funciona
                           if (_isLogin) ...[
                             const SizedBox(height: 16),
                             TextButton(
@@ -526,7 +590,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ],
 
-                          // Divisor
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 24),
                             child: Row(
@@ -541,7 +604,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
 
-                          // Login Social
+                          _buildSocialButton(
+                            label: 'Continuar com Telefone',
+                            icon: Icons.phone_android,
+                            color: const Color(0xFF34C759),
+                            onPressed: _loginComTelefone,
+                          ),
+                          const SizedBox(height: 12),
+
                           _buildSocialButton(
                             label: 'Continuar com Google',
                             icon: Icons.g_mobiledata,
@@ -555,13 +625,10 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: Colors.black,
                             onPressed: _loginComApple,
                           ),
-                          // ✅ REMOVIDO: Botão Facebook (não configurado)
-                          // ✅ REMOVIDO: Botão "Entrar como Visitante" (linhas 489-539)
                         ],
                       ),
                     ),
                   ),
-                  // ✅ REMOVIDO: Botão "Entrar como Visitante" completo
                 ],
               ),
             ),
@@ -651,7 +718,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-// Dialog para solicitar CPF e telefone no login social
 class _DadosComplementaresDialog extends StatefulWidget {
   @override
   State<_DadosComplementaresDialog> createState() => _DadosComplementaresDialogState();
