@@ -1,0 +1,252 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:math';
+import 'dart:developer' as developer;
+import 'package:mailer/mailer.dart';
+import 'package:mailer/smtp_server.dart';
+
+class AuthService {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
+  // Configurações SMTP Brevo
+  final String _brevoSmtpHost = 'smtp-relay.brevo.com';
+  final int _brevoSmtpPort = 587;
+  final String _brevoSmtpLogin = 'a2d962001@smtp-brevo.com';
+  final String _brevoSmtpPassword = 'xsmtpsib-69983f7a36b73d3b9607f26487449ef95ff9cd9caf22b1b7abe24683131994d0-YUfpwFZ4wG2rvrKY';
+  final String _remetenteEmail = 'noreply@notaok.com.br';
+  final String _remetenteNome = 'NotaOK';
+
+  // URL do backend de validação (você pode usar Cloud Functions ou seu próprio servidor)
+  final String _validationBaseUrl = 'https://notaok.com.br/verify';
+
+  /// Gera token seguro de 32 caracteres
+  String _gerarTokenSeguro() {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final random = Random.secure();
+    return List.generate(32, (_) => chars[random.nextInt(chars.length)]).join();
+  }
+
+  /// Cadastrar usuário com validação por email
+  Future<User?> cadastrarComEmail({
+    required String nome,
+    required String email,
+    required String senha,
+  }) async {
+    try {
+      developer.log('🚀 [CADASTRO] Iniciando cadastro para: $email');
+
+      // 1. Criar usuário no Firebase Auth
+      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: senha,
+      );
+
+      User? user = userCredential.user;
+      if (user == null) {
+        throw Exception('Erro ao criar usuário no Firebase Auth');
+      }
+
+      developer.log('✅ [CADASTRO] Usuário criado no Firebase: ${user.uid}');
+
+      // 2. Gerar token de validação
+      final token = _gerarTokenSeguro();
+      developer.log('🔑 [TOKEN] Gerado: ${token.substring(0, 8)}...');
+
+      // 3. Salvar dados no Firestore
+      await _firestore.collection('usuarios').doc(user.uid).set({
+        'nome': nome,
+        'email': email,
+        'email_verificado': false,
+        'token_validacao': token,
+        'token_expiracao': DateTime.now().add(Duration(hours: 24)).millisecondsSinceEpoch,
+        'data_cadastro': FieldValue.serverTimestamp(),
+      });
+
+      developer.log('💾 [FIRESTORE] Dados salvos para UID: ${user.uid}');
+
+      // 4. Enviar email com link de validação
+      await _enviarEmailValidacao(email, nome, token, user.uid);
+
+      developer.log('✅ [CADASTRO] Processo completo para: $email');
+      return user;
+
+    } catch (e, stackTrace) {
+      developer.log('❌ [ERRO CADASTRO] $e', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  /// Envia email de validação via Brevo API REST
+  Future<void> _enviarEmailValidacao(String email, String nome, String token, String userId) async {
+    try {
+      developer.log('📧 [EMAIL SMTP] Enviando para: $email');
+
+      // Link de validação
+      final linkValidacao = 'https://notaok.com.br/verify?token=$token&uid=$userId';
+      
+      // Configurar servidor SMTP Brevo
+      final smtpServer = SmtpServer(
+        _brevoSmtpHost,
+        port: _brevoSmtpPort,
+        username: _brevoSmtpLogin,
+        password: _brevoSmtpPassword,
+      );
+
+      // Criar mensagem HTML
+      final message = Message()
+        ..from = Address(_remetenteEmail, _remetenteNome)
+        ..recipients.add(email)
+        ..subject = '🔗 Confirme seu Email - NotaOK'
+        ..html = """
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px; text-align: center; border-radius: 10px 10px 0 0;">
+    <h1 style="color: white; margin: 0;">✨ Bem-vindo ao NotaOK, $nome!</h1>
+  </div>
+  
+  <div style="padding: 40px; background: white;">
+    <p style="font-size: 16px; color: #333;">Olá, <strong>$nome</strong>! 👋</p>
+    
+    <p style="font-size: 15px; color: #666; line-height: 1.6;">
+      Estamos felizes em tê-lo conosco! Para garantir a segurança da sua conta,
+      clique no botão abaixo para verificar seu email:
+    </p>
+
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="$linkValidacao" 
+         style="display: inline-block; padding: 15px 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                color: white; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold;">
+        ✅ VERIFICAR EMAIL
+      </a>
+    </div>
+
+    <p style="font-size: 13px; color: #999; text-align: center; margin-top: 20px;">
+      Ou copie este link: <br>
+      <span style="color: #667eea; word-break: break-all;">$linkValidacao</span>
+    </p>
+
+    <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin-top: 30px; border-radius: 5px;">
+      <p style="margin: 0; color: #856404; font-size: 14px;">
+        ⏰ <strong>Atenção:</strong> Este link expira em 24 horas.
+      </p>
+    </div>
+  </div>
+
+  <div style="background: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px;">
+    <p style="margin: 0; color: #6c757d; font-size: 13px;">
+      © 2026 NotaOK. Todos os direitos reservados.
+    </p>
+  </div>
+</body>
+</html>
+""";
+
+      // Enviar email
+      final sendReport = await send(message, smtpServer);
+      developer.log('✅ [EMAIL SMTP] Enviado! ID: \${sendReport.toString()}');
+
+    } catch (e, stackTrace) {
+      developer.log('❌ [ERRO EMAIL SMTP] $e', error: e, stackTrace: stackTrace);
+      // Não falhar o cadastro se o email não for enviado
+    }
+  }
+
+  /// Valida o token e marca o email como verificado
+  Future<bool> validarToken(String token, String userId) async {
+    try {
+      developer.log('🔍 [VALIDAÇÃO] Validando token para UID: $userId');
+
+      final userDoc = await _firestore.collection('usuarios').doc(userId).get();
+      
+      if (!userDoc.exists) {
+        developer.log('❌ [VALIDAÇÃO] Usuário não encontrado');
+        return false;
+      }
+
+      final data = userDoc.data()!;
+      final tokenArmazenado = data['token_validacao'] as String?;
+      final expiracao = data['token_expiracao'] as int?;
+
+      if (tokenArmazenado == null || expiracao == null) {
+        developer.log('❌ [VALIDAÇÃO] Token ou expiração não encontrados');
+        return false;
+      }
+
+      // Verifica se o token está expirado
+      if (DateTime.now().millisecondsSinceEpoch > expiracao) {
+        developer.log('⏰ [VALIDAÇÃO] Token expirado');
+        return false;
+      }
+
+      // Verifica se o token corresponde
+      if (token != tokenArmazenado) {
+        developer.log('🔐 [VALIDAÇÃO] Token inválido');
+        return false;
+      }
+
+      // Marca como verificado
+      await _firestore.collection('usuarios').doc(userId).update({
+        'email_verificado': true,
+        'data_validacao': FieldValue.serverTimestamp(),
+        'token_validacao': FieldValue.delete(), // Remove o token usado
+        'token_expiracao': FieldValue.delete(),
+      });
+
+      developer.log('✅ [VALIDAÇÃO] Email verificado com sucesso!');
+      return true;
+
+    } catch (e, stackTrace) {
+      developer.log('❌ [ERRO VALIDAÇÃO] $e', error: e, stackTrace: stackTrace);
+      return false;
+    }
+  }
+
+  /// Login do usuário
+  Future<User?> loginComEmail(String email, String senha) async {
+    try {
+      developer.log('🔑 [LOGIN] Tentando login para: $email');
+
+      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: senha,
+      );
+
+      User? user = userCredential.user;
+      if (user == null) {
+        throw Exception('Usuário não encontrado');
+      }
+
+      // Verifica se o email foi verificado no Firestore
+      final userDoc = await _firestore.collection('usuarios').doc(user.uid).get();
+      final emailVerificado = userDoc.data()?['email_verificado'] ?? false;
+
+      if (!emailVerificado) {
+        developer.log('⚠️ [LOGIN] Email não verificado');
+        await _auth.signOut();
+        throw Exception('Por favor, verifique seu email antes de fazer login.');
+      }
+
+      developer.log('✅ [LOGIN] Login bem-sucedido para: $email');
+      return user;
+
+    } catch (e, stackTrace) {
+      developer.log('❌ [ERRO LOGIN] $e', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  /// Logout
+  Future<void> logout() async {
+    await _auth.signOut();
+  }
+
+  /// Usuário atual
+  User? get usuarioAtual => _auth.currentUser;
+
+  /// Stream de autenticação
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+}

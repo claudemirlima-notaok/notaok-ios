@@ -1,0 +1,9 @@
+{
+  "tessdata_path": "assets/tessdata",
+  "languages": [
+    "por",
+    "eng"
+  ],
+  "oem": 3,
+  "psm": 3
+}

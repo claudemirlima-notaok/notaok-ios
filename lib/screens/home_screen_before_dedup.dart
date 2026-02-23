@@ -1,0 +1,519 @@
+import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import '../services/hive_service.dart';
+import '../services/dados_exemplo.dart';
+import '../models/produto.dart';
+import 'notas_fiscais_screen.dart';
+import 'comprovantes_screen.dart';
+import 'scanner_screen.dart';
+import 'perfil_screen.dart';
+import 'produto_detalhes_screen.dart';
+import 'cadastro_produto_manual_screen.dart';
+import 'package:intl/intl.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _currentIndex = 0;
+  List<Produto> _produtos = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _carregarProdutos();
+    });
+  }
+
+  Future<void> _carregarProdutos() async {
+    try {
+      // Verificar se Hive está inicializado
+      if (!Hive.isBoxOpen('produtos')) {
+        await HiveService.init();
+      }
+      
+      setState(() {
+        _produtos = HiveService.getProdutosAtivos();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao carregar dados: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = [
+      _buildHomeTab(),
+      const NotasFiscaisScreen(),
+      const ComprovantesScreen(),
+      const ScannerScreen(),
+      const PerfilScreen(),
+    ];
+
+    return Scaffold(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: screens,
+      ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Theme.of(context).colorScheme.primary,
+              Theme.of(context).colorScheme.secondary,
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) {
+            setState(() {
+              _currentIndex = index;
+            });
+            if (index == 0) _carregarProdutos();
+          },
+          backgroundColor: Colors.transparent,
+          selectedItemColor: Colors.white,
+          unselectedItemColor: Colors.white70,
+          elevation: 0,
+          type: BottomNavigationBarType.fixed,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_rounded),
+              label: 'Garantias',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.receipt_long_rounded),
+              label: 'Notas',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.credit_card_rounded),
+              label: 'Comprovantes',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.qr_code_scanner_rounded),
+              label: 'Escanear',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_rounded),
+              label: 'Perfil',
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: _currentIndex == 0
+          ? _produtos.isEmpty
+              ? FloatingActionButton.extended(label: const Text("Escanear"), 
+                  onPressed: _adicionarDadosExemplo,
+                  icon: const Icon(Icons.add_shopping_cart),
+// REMOVIDO:                   label: const Text('Dados Exemplo'),
+                  backgroundColor: Theme.of(context).colorScheme.secondary,
+                )
+              : FloatingActionButton.extended(label: const Text("Escanear"), 
+                  onPressed: () async {
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const CadastroProdutoManualScreen(),
+                      ),
+                    );
+                    if (result == true) {
+                      _carregarProdutos();
+                    }
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Adicionar Produto'),
+                  backgroundColor: Theme.of(context).colorScheme.secondary,
+                )
+          : null,
+    );
+  }
+
+  Future<void> _adicionarDadosExemplo() async {
+    // Mostrar loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      await DadosExemplo.adicionarDadosExemplo();
+      await _carregarProdutos();
+      
+      if (mounted) {
+        Navigator.pop(context); // Fechar loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Dados de exemplo adicionados com sucesso!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Fechar loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildHomeTab() {
+    return _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : CustomScrollView(
+      slivers: [
+        SliverAppBar(
+          expandedHeight: 120,
+          floating: false,
+          pinned: true,
+          actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 16.0),
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.asset(
+                      'assets/logos/logo_notaok_final.png',
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            flexibleSpace: FlexibleSpaceBar(
+              title: const Text(
+                'Minhas Garantias',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                ),
+              ),
+              background: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Theme.of(context).colorScheme.primary,
+                      Theme.of(context).colorScheme.secondary,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.all(16),
+            sliver: _produtos.isEmpty
+                ? SliverFillRemaining(
+                    child: _buildEmptyState(),
+                  )
+                : SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        return _buildProdutoCard(_produtos[index]);
+                      },
+                      childCount: _produtos.length,
+                    ),
+                  ),
+          ),
+        ],
+      );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 100,
+            color: Colors.grey[400],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Nenhum produto com garantia ativa',
+            style: TextStyle(
+              fontSize: 18,
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Escaneie uma nota fiscal para começar',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[500],
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: () {
+              setState(() {
+                _currentIndex = 2; // Scanner tab
+              });
+            },
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+            label: const Text('Escanear NF-e'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.secondary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProdutoCard(Produto produto) {
+    final diasRestantes = produto.diasRestantesGarantia;
+    final formatoData = DateFormat('dd/MM/yyyy');
+    
+    Color statusColor;
+    IconData statusIcon;
+    
+    if (diasRestantes == 0) {
+      statusColor = Colors.red;
+      statusIcon = Icons.error_outline;
+    } else if (diasRestantes <= 30) {
+      statusColor = Colors.orange;
+      statusIcon = Icons.warning_amber_rounded;
+    } else {
+      statusColor = Colors.green;
+      statusIcon = Icons.check_circle_outline;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ProdutoDetalhesScreen(produto: produto),
+            ),
+          ).then((_) => _carregarProdutos());
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              colors: [
+                Colors.white,
+                statusColor.withValues(alpha: 0.05),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+                            Theme.of(context).colorScheme.secondary.withValues(alpha: 0.2),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.shopping_bag_rounded,
+                        color: Theme.of(context).colorScheme.primary,
+                        size: 32,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            produto.nome,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (produto.codigoBarras != null) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.qr_code,
+                                  size: 14,
+                                  color: Colors.grey[600],
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  produto.codigoBarras!,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (produto.categoria != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              produto.categoria!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      statusIcon,
+                      color: statusColor,
+                      size: 28,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: statusColor.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Garantia expira em',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            formatoData.format(produto.dataVencimentoGarantia),
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: statusColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: statusColor,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          diasRestantes == 0
+                              ? 'Vencida'
+                              : '$diasRestantes dias',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (produto.estabelecimento != null) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.store_rounded,
+                        size: 16,
+                        color: Colors.grey[600],
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          produto.estabelecimento!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

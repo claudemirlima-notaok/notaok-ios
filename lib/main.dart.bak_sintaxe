@@ -1,0 +1,94 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'firebase_options.dart';
+import 'services/hive_service.dart';
+import 'splash_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/email_verification_screen.dart';
+
+// ✅ NOVA: Flag global para controlar inicialização do Firebase
+bool _firebaseInitialized = false;
+
+void main() async {
+  // Configurar tratamento de erros
+  FlutterError.onError = (FlutterErrorDetails details) {
+    if (kDebugMode) {
+      debugPrint('Flutter Error: ${details.exception}');
+      debugPrint('Stack trace: ${details.stack}');
+    }
+  };
+
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  try {
+    // ✅ CORRIGIDO: Proteção dupla contra inicialização duplicada
+    if (!_firebaseInitialized && Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      _firebaseInitialized = true;
+      if (kDebugMode) {
+        debugPrint('✅ Firebase inicializado com sucesso');
+      }
+    } else {
+      if (kDebugMode) {
+        debugPrint('✅ Firebase já estava inicializado - SKIP inicialização');
+      }
+    }
+    
+    // Inicializar Hive (para cache local)
+    await HiveService.init();
+    
+    if (kDebugMode) {
+      debugPrint('✅ NotaOK inicializado com sucesso');
+    }
+  } catch (e, stackTrace) {
+    if (kDebugMode) {
+      debugPrint('❌ Erro ao inicializar: $e');
+      debugPrint('Stack trace: $stackTrace');
+    }
+    // Continue mesmo com erro - o app pode funcionar sem persistência
+  }
+  
+  runApp(const NotaOKApp());
+}
+
+class NotaOKApp extends StatelessWidget {
+  const NotaOKApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'NotaOK',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF9C27B0), // Roxo
+          secondary: const Color(0xFFFF6F00), // Laranja
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: Colors.grey[50],
+        appBarTheme: const AppBarTheme(
+          elevation: 0,
+          centerTitle: true,
+          backgroundColor: Color(0xFF9C27B0),
+          foregroundColor: Colors.white,
+        ),
+        cardTheme: CardThemeData(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: Color(0xFFFF6F00),
+          foregroundColor: Colors.white,
+        ),
+      ),
+      // ✅ SIMPLIFICADO: Sempre abre no LoginScreen
+      // O login decide para onde ir (HomeScreen ou EmailVerificationScreen)
+      home: const LoginScreen(),

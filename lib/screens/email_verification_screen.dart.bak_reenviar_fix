@@ -1,0 +1,376 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../services/auth_service.dart';
+
+class EmailVerificationScreen extends StatefulWidget {
+  final String email;
+  final String userId;
+
+  const EmailVerificationScreen({
+    Key? key,
+    required this.email,
+    required this.userId,
+  }) : super(key: key);
+
+  @override
+  _EmailVerificationScreenState createState() => _EmailVerificationScreenState();
+}
+
+class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
+  final List<TextEditingController> _controllers = List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
+  
+  bool _isLoading = false;
+  String? _errorMessage;
+  int _resendCooldown = 0;
+
+  @override
+  void dispose() {
+    for (var controller in _controllers) {
+      controller.dispose();
+    }
+    for (var node in _focusNodes) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  void _onDigitChanged(int index, String value) {
+    if (value.length == 1 && index < 5) {
+      _focusNodes[index + 1].requestFocus();
+    }
+    
+    if (value.isEmpty && index > 0) {
+      _focusNodes[index - 1].requestFocus();
+    }
+
+    if (index == 5 && value.isNotEmpty) {
+      _validarCodigo();
+    }
+  }
+
+  Future<void> _validarCodigo() async {
+    final codigo = _controllers.map((c) => c.text).join();
+    
+    if (codigo.length != 6) {
+      setState(() => _errorMessage = 'Digite o código completo');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final authService = AuthService();
+      final sucesso = await authService.validarCodigo(widget.userId, codigo);
+
+      if (sucesso && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Email verificado com sucesso!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.of(context).pushReplacementNamed('/home');
+      } else {
+        setState(() => _errorMessage = 'Código inválido ou expirado');
+      }
+
+    } catch (e) {
+      setState(() => _errorMessage = 'Erro ao validar código');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _reenviarCodigo() async {
+    // ✅ Limpar campos antes de reenviar
+    for (var controller in _controllers) {
+      controller.clear();
+    }
+    
+    setState(() {
+      _codigoCompleto = '';
+      _erro = null;
+      _mensagemSucesso = false;
+    });
+    
+    // Focar no primeiro campo
+    _focusNodes[0].requestFocus();
+
+    if (_resendCooldown > 0) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final authService = AuthService();
+      await authService.reenviarCodigo(widget.email);
+
+      setState(() => _resendCooldown = 60);
+      
+      for (int i = 59; i >= 0; i--) {
+        await Future.delayed(Duration(seconds: 1));
+        if (mounted) setState(() => _resendCooldown = i);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📧 Novo código enviado!'),
+            backgroundColor: Color(0xFF5D4E6D),
+          ),
+        );
+      }
+
+    } catch (e) {
+      setState(() => _errorMessage = 'Erro ao reenviar código');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF8B5E8E), Color(0xFFE87A4F)],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Logo
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 20,
+                          offset: Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.verified_user,
+                      size: 60,
+                      color: Color(0xFF8B5E8E),
+                    ),
+                  ),
+                  SizedBox(height: 20),
+
+                  // Título
+                  Text(
+                    'NotaOK',
+                    style: TextStyle(
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Verifique seu Email',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: Colors.white.withOpacity(0.9),
+                    ),
+                  ),
+                  SizedBox(height: 40),
+
+                  // Card branco
+                  Container(
+                    padding: EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 20,
+                          offset: Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'Enviamos um código para:',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          widget.email,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF5D4E6D),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: 30),
+
+                        // Campos de código
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: List.generate(6, (index) {
+                            return SizedBox(
+                              width: 45,
+                              height: 55,
+                              child: TextField(
+                                controller: _controllers[index],
+                                focusNode: _focusNodes[index],
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                maxLength: 1,
+                                enabled: !_isLoading,
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF5D4E6D),
+                                ),
+                                decoration: InputDecoration(
+                                  counterText: '',
+                                  filled: true,
+                                  fillColor: Colors.grey[100],
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(color: Colors.grey[300]!),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(color: Color(0xFF5D4E6D), width: 2),
+                                  ),
+                                ),
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                                onChanged: (value) => _onDigitChanged(index, value),
+                              ),
+                            );
+                          }),
+                        ),
+                        SizedBox(height: 20),
+
+                        // Mensagem de erro
+                        if (_errorMessage != null)
+                          Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red[50],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red[300]!),
+                            ),
+                            child: Text(
+                              _errorMessage!,
+                              style: TextStyle(color: Colors.red[700]),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        SizedBox(height: 20),
+
+                        // Botão validar
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _validarCodigo,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Color(0xFF5D4E6D),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: _isLoading
+                                ? SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Text(
+                                    'Verificar Código',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        SizedBox(height: 16),
+
+                        // Botão reenviar
+                        TextButton(
+                          onPressed: _resendCooldown > 0 || _isLoading ? null : _reenviarCodigo,
+                          child: Text(
+                            _resendCooldown > 0
+                                ? 'Aguarde $_resendCooldown s para reenviar'
+                                : 'Reenviar Código',
+                            style: TextStyle(
+                              color: _resendCooldown > 0 ? Colors.grey : Color(0xFF5D4E6D),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 16),
+
+                        // Aviso
+                        Container(
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.amber[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.amber[300]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.info_outline, color: Colors.amber[800], size: 20),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'O código expira em 10 minutos',
+                                  style: TextStyle(
+                                    color: Colors.amber[900],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
