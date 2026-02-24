@@ -37,7 +37,8 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     
-    if (kDebugMode) {
+    // 🧪 DADOS DE TESTE
+    {
       _nomeController.text = 'Claudemir Lima';
       _cpfController.text = '154.667.848-42';
       _telefoneController.text = '(19) 98282-8291';
@@ -48,6 +49,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _dataNascimentoController = TextEditingController();
 
   @override
+
+  /// Trata mensagens de erro do Firebase Auth
   String _tratarErroLogin(dynamic e) {
     final erro = e.toString().toLowerCase();
     
@@ -159,6 +162,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       
+      // ✅ Verificar se email precisa ser validado
       final erroStr = e.toString();
       if (erroStr.contains('VERIFICACAO_PENDENTE')) {
         final partes = erroStr.split('|');
@@ -186,7 +190,8 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
         
-        Future.delayed(const Duration(seconds: 2), () {
+        // Redirecionar para tela de verificação de email
+        Future.delayed(Duration(seconds: 2), () {
           if (mounted) {
             Navigator.of(context).pushReplacementNamed(
               '/email-verification',
@@ -238,35 +243,93 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       Navigator.of(context).pop();
       
-      String errorMessage = 'Erro ao enviar email de recuperação';
-      String errorStr = e.toString().toLowerCase();
-      
-      if (errorStr.contains('email não cadastrado') || errorStr.contains('não encontrado') || errorStr.contains('not found')) {
-        errorMessage = '❌ Email não cadastrado.\n\nPor favor, crie uma conta primeiro.';
-      } else if (errorStr.contains('network') || errorStr.contains('connection')) {
-        errorMessage = '❌ Erro de conexão.\n\nVerifique sua internet.';
-      }
-      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(errorMessage),
+          content: Text('Erro ao enviar email: $e'),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
         ),
       );
     }
   }
 
+  Future<void> _mostrarDialogRecuperarSenha_OLD() async {
+    final emailController = TextEditingController(text: _emailController.text.trim());
+    
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Recuperar Senha'),
+        content: TextField(
+          controller: emailController,
+          decoration: const InputDecoration(
+            labelText: 'Email',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.email),
+          ),
+          keyboardType: TextInputType.emailAddress,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final email = emailController.text.trim();
+              
+              if (email.isEmpty || !email.contains('@')) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Por favor, digite um email válido'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              
+              Navigator.of(context).pop();
+              
+              try {
+                await _authService.recuperarSenha(email);
+                
+                if (!mounted) return;
+                
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) => PasswordResetScreen(email: email),
+                  ),
+                );
+              } catch (e) {
+                if (!mounted) return;
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Erro ao enviar email: $e'),
+                    backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 5),
+                  ),
+                );
+              }
+            },
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   Future<void> _loginComGoogle() async {
     setState(() => _isLoading = true);
 
     try {
+      // 1️⃣ Fazer login com Google PRIMEIRO
       final GoogleSignIn googleSignIn = GoogleSignIn();
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       
       if (googleUser == null) {
         setState(() => _isLoading = false);
-        return;
+        return; // Usuário cancelou
       }
 
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
@@ -276,15 +339,18 @@ class _LoginScreenState extends State<LoginScreen> {
         idToken: googleAuth.idToken,
       );
 
+      // 2️⃣ Autenticar no Firebase
       final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
 
       if (userCredential.user == null) {
         throw Exception('Falha na autenticação com Google');
       }
 
+      // 3️⃣ ✅ CORRIGIDO: Verificar se usuário JÁ TEM dados antes de pedir
       final userDoc = await _firestore.collection('usuarios').doc(userCredential.user!.uid).get();
       
       if (userDoc.exists && userDoc.data()?['cpf'] != null) {
+        // ✅ Usuário já tem dados - ir direto para home
         setState(() => _isLoading = false);
         if (mounted) {
           Navigator.of(context).pushReplacementNamed('/home');
@@ -292,6 +358,7 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
       
+      // 4️⃣ ❌ Primeira vez - pedir CPF e telefone AGORA
       setState(() => _isLoading = false);
       
       final cpfTelefone = await showDialog<Map<String, String>>(
@@ -300,12 +367,14 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       
       if (cpfTelefone == null) {
+        // Usuário cancelou - fazer logout
         await FirebaseAuth.instance.signOut();
         return;
       }
 
       setState(() => _isLoading = true);
 
+      // 5️⃣ Salvar dados no Firestore
       await _firestore.collection('usuarios').doc(userCredential.user!.uid).set({
         'nome': userCredential.user!.displayName ?? googleUser.displayName ?? 'Usuário Google',
         'email': userCredential.user!.email ?? googleUser.email,
@@ -339,6 +408,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // 1️⃣ Solicita credenciais do Apple
       final appleCredential = await SignInWithApple.getAppleIDCredential(
         scopes: [
           AppleIDAuthorizationScopes.email,
@@ -346,12 +416,14 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       );
 
+      // 2️⃣ Cria credencial OAuth para Firebase
       final oAuthProvider = OAuthProvider('apple.com');
       final credential = oAuthProvider.credential(
         idToken: appleCredential.identityToken,
         accessToken: appleCredential.authorizationCode,
       );
 
+      // 3️⃣ Autentica no Firebase
       final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
 
       if (userCredential.user == null) {
@@ -360,15 +432,20 @@ class _LoginScreenState extends State<LoginScreen> {
 
       setState(() => _isLoading = false);
 
+      // 4️⃣ ✅ NOVO: Pedir CPF e telefone (igual Google!)
+      
+      // 4️⃣ ✅ CORRIGIDO: Verificar se usuário JÁ TEM dados antes de pedir
       final userDoc = await _firestore.collection('usuarios').doc(userCredential.user!.uid).get();
       
       if (userDoc.exists && userDoc.data()?['cpf'] != null) {
+        // ✅ Usuário já tem dados - ir direto para home
         if (mounted) {
           Navigator.of(context).pushReplacementNamed('/home');
         }
         return;
       }
       
+      // ❌ Primeira vez - pedir CPF e telefone
       if (mounted) {
         final cpfTelefone = await showDialog<Map<String, String>>(
           context: context,
@@ -376,14 +453,17 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         if (cpfTelefone == null) {
+          // Usuário cancelou - fazer logout
           await FirebaseAuth.instance.signOut();
           return;
         }
 
         setState(() => _isLoading = true);
 
+        // 5️⃣ Salvar dados complementares no Firestore
         await _firestore.collection('usuarios').doc(userCredential.user!.uid).set({
-          'nome': userCredential.user!.displayName ?? '${appleCredential.givenName ?? ''} ${appleCredential.familyName ?? ''}'.trim(),
+          'nome': userCredential.user!.displayName ?? 
+                  '${appleCredential.givenName ?? ''} ${appleCredential.familyName ?? ''}'.trim(),
           'email': userCredential.user!.email ?? 'apple_user@notaok.com',
           'cpf': cpfTelefone['cpf']!,
           'telefone': cpfTelefone['telefone']!,
@@ -412,6 +492,15 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  void _loginComTelefone() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const PhoneVerificationScreen(phoneNumber: "+5511999999999"),
+      ),
+    );
   }
 
   @override
@@ -582,7 +671,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             obscureText: _obscurePassword,
                             suffixIcon: IconButton(
                               icon: Icon(
-                                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                                _obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
                               ),
                               onPressed: () {
                                 setState(() {
@@ -651,6 +742,14 @@ class _LoginScreenState extends State<LoginScreen> {
                               ],
                             ),
                           ),
+
+                          _buildSocialButton(
+                            label: 'Continuar com Telefone',
+                            icon: Icons.phone_android,
+                            color: const Color(0xFF34C759),
+                            onPressed: _loginComTelefone,
+                          ),
+                          const SizedBox(height: 12),
 
                           _buildSocialButton(
                             label: 'Continuar com Google',
