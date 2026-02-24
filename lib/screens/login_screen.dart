@@ -9,6 +9,7 @@ import '../services/auth_service.dart';
 import '../models/usuario.dart';
 import 'email_verification_screen.dart';
 import 'phone_verification_screen.dart';
+import 'password_reset_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -207,27 +208,65 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _mostrarDialogRecuperarSenha() async {
-    final emailController = TextEditingController();
+    final email = _emailController.text.trim();
+    
+    if (email.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Por favor, digite um email válido'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      ),
+    );
+    
+    try {
+      await _authService.recuperarSenha(email);
+      
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => PasswordResetScreen(email: email),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao enviar email: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _mostrarDialogRecuperarSenha_OLD() async {
+    final emailController = TextEditingController(text: _emailController.text.trim());
     
     return showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Recuperar Senha'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Digite seu email para receber instruções de recuperação:'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: emailController,
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.email),
-              ),
-              keyboardType: TextInputType.emailAddress,
-            ),
-          ],
+        content: TextField(
+          controller: emailController,
+          decoration: const InputDecoration(
+            labelText: 'Email',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.email),
+          ),
+          keyboardType: TextInputType.emailAddress,
         ),
         actions: [
           TextButton(
@@ -237,10 +276,11 @@ class _LoginScreenState extends State<LoginScreen> {
           ElevatedButton(
             onPressed: () async {
               final email = emailController.text.trim();
+              
               if (email.isEmpty || !email.contains('@')) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('❌ Digite um email válido'),
+                    content: Text('Por favor, digite um email válido'),
                     backgroundColor: Colors.red,
                   ),
                 );
@@ -251,23 +291,24 @@ class _LoginScreenState extends State<LoginScreen> {
               
               try {
                 await _authService.recuperarSenha(email);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('✅ Email de recuperação enviado para $email'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                }
+                
+                if (!mounted) return;
+                
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) => PasswordResetScreen(email: email),
+                  ),
+                );
               } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(_tratarErroLogin(e)),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
+                if (!mounted) return;
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Erro ao enviar email: $e'),
+                    backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 5),
+                  ),
+                );
               }
             },
             child: const Text('Enviar'),
@@ -276,6 +317,7 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+
 
   Future<void> _loginComGoogle() async {
     setState(() => _isLoading = true);

@@ -65,7 +65,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDOrA6EhWeJs42guL8n79ootnF-KiK-v4o',
-    appId: '1:266728357187:ios:IOSAPPID',
+    appId: '1:266728357187:ios:8a1f073d6b407b5de703f6',
     messagingSenderId: '266728357187',
     projectId: 'notaok-4d791',
     storageBucket: 'notaok-4d791.firebasestorage.app',

@@ -593,5 +593,3 @@ final String _brevoSmtpPassword = dotenv.env['SMTP_PASSWORD'] ?? '';
       throw Exception('Falha ao enviar email');
     }
   }
-
-}

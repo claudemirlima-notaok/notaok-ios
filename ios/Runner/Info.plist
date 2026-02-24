@@ -30,14 +30,22 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.googleusercontent.apps.266728357187-7mhd6usv2ie2odchtv4qofvvc5jt4f4a</string>
-				
 			</array>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>FacebookAppID</key>
+	<string>266728357187</string>
+	<key>FacebookDisplayName</key>
+	<string>NotaOK</string>
 	<key>GIDClientID</key>
 	<string>266728357187-7mhd6usv2ie2odchtv4qofvvc5jt4f4a.apps.googleusercontent.com</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>fbapi</string>
+		<string>fbauth2</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
